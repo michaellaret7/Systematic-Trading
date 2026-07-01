@@ -4,89 +4,108 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-This repo is a **uv workspace** of three packages (see Architecture). Install the whole workspace into one shared venv with `uv sync --all-packages` — a plain `uv sync` only syncs the virtual root (which depends on nothing) and leaves the members uninstalled.
+Single package (`systematic-trading`) managed by **uv**. Python `>=3.12,<3.14`; `.python-version` pins 3.13. `uv sync` installs everything (dev tooling included via the default `dev` dependency group; skip with `--no-dev`).
 
-Entry points:
-- `uv run python -m coding` — the coding-domain agent (bash, read/write/edit, glob/grep/tree + base web tools).
-- `uv run python -m agent_harness` — the bare base agent with no domain tools. Used as a dev sanity check that the streaming loop and TUI work end-to-end without any coding tools attached.
+Entry points (defined in `[project.scripts]`):
+- `uv run backtest <strategy> [...]` — backtest one or more registered strategies on Alpaca historical data. Flags: `--start`, `--end` (ISO dates), `--budget`. Outputs (stats CSV, trades, HTML tearsheet) land in `logs/`.
+- `uv run live <strategy> [...]` — paper/live trade on Alpaca. All named strategies share one broker connection in a single `Trader` until Ctrl+C. **Paper by default** — real money only when `ALPACA_PAPER=false`.
 
-Both launch the TUI (`tui/app.py`). To use the agent programmatically, import `Agent` and call `agent.run(task, sink=..., cancel_event=...)`. The task can also be set at init via `Agent(task=...)` and `run()` called with no arg — useful for batch pipelines. If `sink` is None, output goes to stdout via `StdoutSink`.
+Strategy names come from the `STRATEGIES` registry in `src/systematic_trading/strategies/__init__.py` (e.g. `uv run backtest sp500_momentum`).
 
-Pinned to Python 3.12 (`<3.13`) via `pyproject.toml` and `.python-version`. uv will refuse to sync on a 3.13 interpreter.
+Other commands:
+- `uv run pytest` — smoke tests (`tests/test_smoke.py`); no network, no orders.
+- `uv run ruff check` / `uv run ruff format` — lint/format (line length 100).
 
-There is no test suite or linter configured. The two library packages build as wheels via hatchling (`uv build packages/agent_harness`); `coding` is a non-package (`package = false`) consumer that runs in place.
+`scripts/` holds older single-strategy entry points (`backtest_sp500_momentum.py`, `run_sp500_momentum.py`); the generic runners above are the preferred interface.
 
-## Response Type 
-- Please be clear, concise, and to the point in your responses and do your best to avoid unecessary verbosity
+## Documentation
 
-## Overall Goal of Code 
-- To write clean, clear, well architected code that is easy for humans to understand 
+**Lumibot docs: https://lumibot.lumiwealth.com/** — go here for anything framework-related. Check the docs before guessing at Lumibot API behavior; the framework has many non-obvious conventions.
+
+Key pages (consult these directly — they cover most day-to-day work):
+
+- **Strategy methods** — https://lumibot.lumiwealth.com/strategy_methods.html — everything callable on `self` inside a strategy: orders (`create_order`, `submit_order`), data (`get_last_price`, `get_historical_prices`), positions, account state.
+- **Lifecycle methods** — https://lumibot.lumiwealth.com/lifecycle_methods.html — the hooks Lumibot calls (`initialize`, `on_trading_iteration`, `before_market_closes`, `on_filled_order`, `on_abrupt_closing`, …) and when each fires.
+- **Strategy properties** — https://lumibot.lumiwealth.com/strategy_properties.html — attributes like `self.cash`, `self.portfolio_value`, `self.sleeptime`, `self.is_backtesting`, `self.minutes_before_closing`.
+- **Entities** — https://lumibot.lumiwealth.com/entities.html — the `Asset`, `Order`, `Position`, `Bars` objects that methods take and return.
+- **Alpaca broker** — https://lumibot.lumiwealth.com/brokers.alpaca.html — our broker: config dict shape, supported order types/sides, quirks.
+- **Examples** — https://lumibot.lumiwealth.com/examples.html — complete reference strategies showing idiomatic Lumibot patterns.
 
 ## Architecture
 
-### Workspace layout
+**Lumibot is the infrastructure layer only** — backtesting plus paper/live execution through its native Alpaca broker. Strategies, agents, portfolio construction, and data enrichment are our own code under `src/systematic_trading/`. Keep that boundary: we don't fork or monkey-patch Lumibot; we subclass `Strategy` and wire brokers/data sources in the runners.
 
-The repo is a **uv workspace** with a virtual root (`pyproject.toml` at the repo root holds only `[tool.uv.workspace]`, `package = false`). Three members:
+### Layout
 
-- `packages/agent_harness/` — the `agent-harness` distributable (import `agent_harness`). The base `Agent` class, streaming loop, ToolHandler, sinks, base skills, and base tools (`agent_harness/base_tools/`: WebSearch, WebExtract, Plan, Skill, LoadTool, ReadFile; `agent_harness/base_tools/helpers/` for path normalization). Domain-agnostic. Treat it as the shared package: no domain logic leaks in, and the dependency direction is one-way (frontend/domains → `agent_harness`, never the reverse). It **reads** configuration (`os.getenv`) but never **loads** it — applications (the entry points) own bootstrap, including `load_dotenv()`. Core deps are `openai`/`httpx`/`pydantic`/`langfuse` — the LangfuseSink ships with the engine and auto-registers when `LANGFUSE_PUBLIC_KEY` is present (its import in `sinks/__init__.py` is lazy, gated on that env var, so the package is pulled but only loaded when tracing is on). Built with hatchling under `src/` layout.
-- `packages/tui/` — the `tui` distributable (import `tui`). prompt_toolkit + Rich frontend; depends on `agent-harness`. Generic — no domain knowledge. `prompt_toolkit`/`rich` live here, not in the engine, so headless consumers of `agent_harness` never pull terminal-UI deps.
-- `coding/` — the coding **domain** and in-repo consumer (`package = false`, runs in place; consumes both libraries). Owns coding-specific tools (`coding/tools/`), system prompt (`coding/system_prompt.md`), memory (`coding/memory.md`), skills (`coding/skills/`), and the user-facing entry point (`coding/__main__.py`).
+```
+src/systematic_trading/
+  config.py          # env/secrets; alpaca_config() → Lumibot broker dict
+  logging_setup.py   # two-channel logging (quiet Lumibot / concise strategy narrative)
+  backtest.py        # `uv run backtest` — generic runner over STRATEGIES
+  live.py            # `uv run live` — generic runner over STRATEGIES
+  strategies/        # Lumibot Strategy subclasses + STRATEGIES registry
+  agents/            # LLM / tool-calling decision layer (broker-agnostic)
+  data/              # supplementary data adapters (FMP lives here)
+scripts/             # legacy single-strategy entry points
+tests/               # smoke tests
+logs/                # backtest outputs (tearsheets, stats, trades) — git-ignored
+```
 
-**On distribution & backwards-compat:** the two library packages are meant to be consumed by domains in *other* repos (via Git dependency, e.g. `agent-harness @ git+…#subdirectory=packages/agent_harness`). Because external systems pin a version, `agent_harness`'s public API warrants SemVer discipline — the "No backwards-compatibility shims / update every caller" Hard Rule below applies cleanly *within* this workspace, but a breaking change to the engine's public surface is a real major-version event for outside consumers.
+### The strategy contract
 
-Domains assemble an Agent by passing constructor args: `system`, `tools`, `domain_root` (and optionally `task` for batch / one-shot use). The base ships generic methodology only — no skills (it has no write/edit/bash tools, so a skill like `skill_builder` belongs in a domain that can execute it, e.g. `coding/skills/`). The domain appends a `<role>` block via `system=`, registers its tools, and points `domain_root=` at its package directory — Agent then loads `<root>/skills/` (auto-creating the dir if missing) and `<root>/memory.md` (optional) by convention. No subclassing — just composition through `Agent(...)`.
+Each strategy subclasses `lumibot.strategies.Strategy`. **The same class runs in backtest, paper, and live** — only the broker/data-source wiring in the runner changes. Guard against anything that would break this symmetry (e.g. use `self.get_datetime()`, never `datetime.now()`; use `self.is_backtesting` to branch where cadence must differ).
 
-### TUI
+To add a strategy:
+1. Subclass `Strategy` in a new module under `strategies/`.
+2. Define `WARM_UP_TRADING_DAYS` on the class — the backtest runner preloads that much daily history so indicators are warm at the first iteration (e.g. `SP500Momentum` needs 140 for its 126-day momentum score).
+3. Register it in the `STRATEGIES` dict in `strategies/__init__.py` under the CLI name you want.
 
-`packages/tui/` is the prompt_toolkit + Rich frontend (import `tui`). Architecture:
-- `tui/cells/` — Cell taxonomy (User/Assistant/Tool/Error). Each cell renders to ANSI via Rich and caches the result on `cell.ansi`.
-- `tui/history.py` — Lock-protected list of cells. Mutated by Sink (worker thread); read by renderer (UI thread).
-- `tui/sink.py` — `TUISink`, one implementation of the engine's `Sink` Protocol (`on_user_message`, `on_reasoning_delta`, `on_content_delta`, `on_assistant_end`, `on_tool_start`, `on_tool_end`, `on_error`, `on_interrupted`) that mutates History + invalidates the app. The Protocol itself and the headless `StdoutSink` live in `agent_harness/sinks/`.
-- `tui/panels/` — `OutputPanel` (FormattedTextControl + ANSI), `InputPanel` (TextArea, multi-line, Shift+Enter newline), `StatusBar`.
-- `tui/app.py` — `TUIApp` class. Async shell, sync loop. On Enter, `agent.run(prompt, sink, cancel_event)` runs in a worker via `asyncio.to_thread`. Esc sets `cancel_event` AND closes the in-flight stream. Ctrl+C double-tap exits.
+Tunables go in the class-level `parameters` dict (Lumibot convention), not module constants.
 
-**Transparent background is a hard constraint** — Rich and prompt_toolkit are configured to never set a background color, so the terminal's native theme shows through.
+### Non-obvious Lumibot/Alpaca invariants (learned the hard way)
 
-### Provider abstraction
+- **Shorts need explicit sides.** Lumibot's backtesting broker treats a plain `"sell"` as close-only and cancels it once the position is flat. Short entries/exits must use `"sell_short"` / `"buy_to_cover"`; the live Alpaca broker maps them back to plain buy/sell for the API. See `SP500Momentum._rebalance_orders`.
+- **Alpaca can't flip a position through zero in one order.** A long↔short flip is two orders: close the existing position, then open the new one.
+- **Order sequencing matters for cash.** Submit sells (long exits, new shorts) before buys, and risk-reducing buys (`buy_to_cover`) before new-long buys; size buys against the cash the sells raise.
+- **Backtests step daily, live runs at minute cadence.** Minute-stepping a year of simulated time is impractical, so `sleeptime` is `"1D"` when `self.is_backtesting`, `"1M"` live. Intraday logic (like drift trims) therefore runs once per simulated day in backtests.
+- **`on_abrupt_closing` deliberately does NOT `sell_all()`** — the monthly book should survive restarts. Don't "fix" this.
+- **Windows console encoding.** `configure_logging()` forces UTF-8 on stdout/stderr because cp1252 chokes on Lumibot's Unicode progress bar and aborts backtests mid-run. Don't remove it.
 
-Both providers (`vllm`, `openrouter`) talk through the **OpenAI Python SDK**. `agent_harness/client.py` is the single place that knows about provider differences:
+### Data model
 
-- `vllm` uses a placeholder API key (the hosted endpoint is unauthenticated) and pulls `VLLM_API_URL` / `VLLM_MODEL` from env.
-- `openrouter` requires `OPENROUTER_API_KEY` and a `model` argument (any model string from openrouter.ai/models); `OPENROUTER_API_URL` is optional.
+- **Live/paper:** Alpaca is both broker and price feed — Lumibot streams it automatically. `self.get_last_price()` / `self.get_historical_prices()` just work.
+- **Backtest:** `AlpacaBacktesting` (same keys as live). Other Lumibot data sources (Yahoo, `PandasDataBacktesting`, ThetaData via the `thetadata` extra) are options when needed.
+- **FMP is NOT a Lumibot data source.** Financial Modeling Prep is enrichment (fundamentals, macro) called directly from strategy/agent logic via `systematic_trading.data.fmp.FMPClient`, alongside Alpaca prices.
 
-Note: the `Agent` class default is `provider='vllm'`, but `coding/__main__.py` (the user entry point) overrides it to `provider='openrouter', model='anthropic/claude-opus-4.7'`. Changing the default behavior of `python -m coding` means editing that file, not the class default.
+### Agents
 
-### The streaming loop (`agent_harness/loop.py`)
+`agents/` holds the LLM / tool-calling decision layer. Agents are plain Python — a strategy calls into one during `on_trading_iteration` to produce signals or sizing. Keep agents **broker-agnostic** so they run identically in backtest and live.
 
-This is the load-bearing file. Two non-obvious invariants:
+### Logging
 
-1. **Tool-call fragment reassembly.** OpenAI emits `tool_calls` as deltas keyed by `index`. The first fragment carries `id` and `function.name`; subsequent fragments append to `function.arguments`. `call_llm` accumulates these into a dict-by-index, then sorts to a list. If you change the streaming logic, preserve the index-keyed merge — concatenating fragments in arrival order will corrupt parallel tool calls.
+`logging_setup.py` runs two channels so the console reads as a strategy narrative:
+- **Framework (`lumibot`)** — quieted to WARNING, with a deny-list (`NOISE_SUBSTRINGS`) dropping known non-actionable startup warnings.
+- **Strategy (`systematic_trading`)** — compact `HH:MM:SS | message` format via `get_logger(name)`.
 
-2. **Reasoning content is printed but never persisted.** `delta.reasoning_content` (and the non-stream `message.reasoning`) are surfaced live to stdout but deliberately **not** appended to `messages`. This matches the convention for thinking-model APIs and keeps `<think>` blocks out of subsequent prompts. Don't "fix" this by adding it to history.
-
-The loop bails at `max_iters` (default 100) to prevent runaway tool-call cycles. Override per-agent via `Agent(max_iters=...)`.
-
-### Agent ↔ ToolHandler split
-
-`Agent` owns the tool **registry** (`self.tools` schema list + `self.tool_functions` callable map) and message history. `ToolHandler` owns **execution only** — it reads from `agent.tool_functions` and returns `role: "tool"` messages. The handler does not register tools. Keep this split when extending: registration on `Agent`, dispatch on `ToolHandler`.
-
-### Tool schema
-
-A tool module exports a `tool` dict with exactly four keys: `name`, `description`, `parameters` (JSON Schema), `function` (callable). Register via `agent.add_tool(module.tool)`. Functions decorated with `@agent_tool` (see `agent_harness/decorator.py`) carry the dict on their `.tool` attribute; pass the function itself: `agent.add_tool(my_fn)`. `add_tool` is idempotent by name — re-registering is a silent no-op, not an error.
-
-### Bash tool platform handling
-
-`coding/tools/bash.py` intentionally avoids `shell=True` and resolves a real bash binary at import time. On Windows it prefers Git Bash paths and skips `System32\bash.exe` (WSL), which sees a different filesystem. `BASH_PATH` env var overrides the lookup. Don't replace this with `shell=True` — it would silently dispatch to `cmd.exe` on Windows, which doesn't understand the POSIX commands the model emits.
+Call `configure_logging()` once at startup (it's idempotent), after `import lumibot`, before `trader.run_all()`. Lumibot's telemetry JSON is disabled separately via `LUMIBOT_TELEMETRY=false` in `.env`.
 
 ## Configuration
 
-`.env` is required. `.env.example` lists both provider blocks (`OPENROUTER_*`, `VLLM_*`). Only the credentials for the provider you actually use need real values.
+`.env` is required (copy `.env.example`): Alpaca keys (broker + price feed), `ALPACA_PAPER` (defaults to true — live trading is opt-in), `FMP_API_KEY`, `LUMIBOT_TELEMETRY=false`.
 
-System prompts live in two places:
-- `agent_harness/context/system_prompt.md` — the always-loaded base methodology (Tools, Skills, Planning + generic constraints). Domain-agnostic.
-- `<domain>/prompt.md` — appended to the base by `Agent.__init__` when the caller passes `prompt=...`. Holds the `<role>` and any domain-specific constraints. The caller reads this and passes the string; the framework doesn't auto-discover it (unlike skills/ and memory.md).
+All credential handling lives in `config.py` — **strategies and agents never read `os.environ` directly**. `config.py` calls `load_dotenv(override=False)` on import (real env vars win over `.env`, which is what CI/prod wants) and fails fast via `_require()` on missing keys. `alpaca_config()` returns the dict shape Lumibot's `Alpaca` broker expects.
 
-Per-domain memory lives at `<domain>/memory.md` and is loaded automatically when the caller passes `domain_root=...` (missing file → empty memory, not an error). The base agent has no memory file of its own. Everything is read at `Agent.__init__` — there is no runtime reload.
+## Safety rails (trading-specific)
+
+- **Never default to real money.** Anything that touches order submission must keep paper as the default path; `ALPACA_PAPER=false` is an explicit user decision, never something code or docs flip silently.
+- **Never run `uv run live` (or the `scripts/run_*` equivalents) yourself** unless the user explicitly asks — it opens a broker connection and can place orders. Backtests and `pytest` are safe to run freely.
+- When changing order logic, trace the cash/position accounting by hand (sells → available cash → buys) before trusting a backtest that "looks fine".
+
+## Response Type
+- Please be clear, concise, and to the point in your responses and do your best to avoid unecessary verbosity
+
+## Overall Goal of Code
+- To write clean, clear, well architected code that is easy for humans to understand
 
 ## Development Guidelines
 
@@ -211,7 +230,7 @@ def process_items(items: list[str], lookup: dict):
 
 - Module docstring explaining purpose.
 - Complete docstrings on public functions.
-- **Preserve existing comments.** Do NOT delete or "clean up" inline comments that are already in the code — including short step-marker comments like `# Emit tool start event to the sink`. Treat them as intentional. Only remove a comment if it is factually wrong after your change, and then replace it with a correct one rather than deleting it outright. This overrides any default tendency to strip "narration" comments.
+- **Preserve existing comments.** Do NOT delete or "clean up" inline comments that are already in the code — including short step-marker comments. Treat them as intentional. Only remove a comment if it is factually wrong after your change, and then replace it with a correct one rather than deleting it outright. This overrides any default tendency to strip "narration" comments.
 - When editing a function, leave untouched comments exactly as they are unless the line they describe is itself being changed.
 - Helper functions live at the **top** of the file under a banner block:
 
@@ -230,6 +249,7 @@ Before writing or planning: assess whether the approach is under-engineered, opt
 - No pytest scaffolding — write **real tests with real data**.
 - A test exercises the full flow: pull real inputs, call the function, grade the output. Lint/format afterward.
 - Don't create parallel `test_x.py` and `test_x_fixed.py` files — fix the one test in place.
+- Trading-specific: tests must never place orders or hit the broker; a strategy change is verified by a backtest (`uv run backtest <name>`), whose tearsheet/stats in `logs/` are the ground truth.
 
 ### Hard Rules
 
@@ -237,7 +257,7 @@ Before writing or planning: assess whether the approach is under-engineered, opt
 - **Never create CLI flag–driven test scripts** like `tests/foo.py --mode long-only`. If behavior needs to switch, write separate entry points or pass arguments programmatically.
 - **Never auto-create READMEs** for specific functionality unless explicitly requested.
 - **Disagree freely** — correctness beats agreement. If the user is wrong, say so.
-- For specs, standards, or patterns worth referencing later, write a document under `docs/`, organized by topic (e.g. `docs/tools/`, `docs/agents/`). Institutional knowledge belongs in the repo, not just chat history.
+- For specs, standards, or patterns worth referencing later, write a document under `docs/`, organized by topic (e.g. `docs/strategies/`, `docs/data/`). Institutional knowledge belongs in the repo, not just chat history.
 - **Agent system prompts use XML tags** (`<role>`, `<methodology>`, `<constraints>`, `<output_format>`) for top-level structure; markdown headers are sub-structure within those XML sections.
 - Use the LSP / Pyright server when available.
 
