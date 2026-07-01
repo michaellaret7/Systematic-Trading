@@ -1,0 +1,41 @@
+[project]
+name = "systematic-trading"
+version = "0.1.0"
+description = "Systematic trading system with agents embedded in the investment process. Lumibot is the infrastructure layer; strategies, agents, and portfolios are our own."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+authors = [{ name = "Michael Laret", email = "michaellaret7@gmail.com" }]
+dependencies = [
+    # Core infrastructure: backtesting + paper/live execution, native Alpaca broker.
+    # Pulls in alpaca-py, pandas, numpy, polars, pyarrow, etc. transitively.
+    "lumibot==4.5.63",
+    # Data enrichment (fundamentals/macro) called directly inside strategies.
+    # Not a Lumibot data source — Alpaca remains the live price feed.
+    "fmpsdk>=20240622",
+]
+
+[project.optional-dependencies]
+# Paid/specialty backtesting data sources — install with: uv sync --extra thetadata
+thetadata = ["thetadata"]
+
+[dependency-groups]
+# Dev tooling. Installed by default with `uv sync`; skip via `uv sync --no-dev`.
+dev = [
+    "ruff>=0.6",
+    "pytest>=8",
+    "ipykernel>=6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/systematic_trading"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
