@@ -13,8 +13,3 @@ from __future__ import annotations
 
 from lumibot.strategies import Strategy
 
-from systematic_trading.strategies.sp500_momentum import SP500Momentum
-
-STRATEGIES: dict[str, type[Strategy]] = {
-    "sp500_momentum": SP500Momentum,
-}

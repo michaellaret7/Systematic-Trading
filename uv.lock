@@ -945,19 +945,6 @@ wheels = [
 ]
 
 [[package]]
-name = "fmpsdk"
-version = "20250102.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "python-dotenv" },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/5d/6a867e002c5a780081d3be025fb18793f7ffcc2cbae2ce37984a210e94ef/fmpsdk-20250102.0.tar.gz", hash = "sha256:2975555f9c8b3f57b1efbab372d4393c46ffc902f0ad76529e69240aabf26867", size = 17477 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/1b/73622af72e7ebce815f39d21bb2408a9d47f107f8deb7de90f09fa88f4a5/fmpsdk-20250102.0-py2.py3-none-any.whl", hash = "sha256:8da18de8fe974df1955cb8b30741d01cc915c0982a175c2b9d2c73ea39c4ed76", size = 26066 },
-]
-
-[[package]]
 name = "fonttools"
 version = "4.63.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2875,7 +2862,7 @@ name = "pip-system-certs"
 version = "5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pip" },
+    { name = "pip", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/6a/563b05a4f6c9ddc205c98bb413e74221368efb98b8fb9cca96b578b8930c/pip_system_certs-5.3.tar.gz", hash = "sha256:19c8bf9957bcce7d69c4dbc2d0b2ef13de1984d53f50a59012e6dbbad0af67c6", size = 6395 }
 wheels = [
@@ -3947,8 +3934,8 @@ name = "systematic-trading"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "fmpsdk" },
     { name = "lumibot" },
+    { name = "requests" },
 ]
 
 [package.optional-dependencies]
@@ -3965,8 +3952,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fmpsdk", specifier = ">=20240622" },
     { name = "lumibot", specifier = "==4.5.63" },
+    { name = "requests", specifier = ">=2.31" },
     { name = "thetadata", marker = "extra == 'thetadata'" },
 ]
 provides-extras = ["thetadata"]

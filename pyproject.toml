@@ -9,9 +9,9 @@ dependencies = [
     # Core infrastructure: backtesting + paper/live execution, native Alpaca broker.
     # Pulls in alpaca-py, pandas, numpy, polars, pyarrow, etc. transitively.
     "lumibot==4.5.63",
-    # Data enrichment (fundamentals/macro) called directly inside strategies.
-    # Not a Lumibot data source — Alpaca remains the live price feed.
-    "fmpsdk>=20240622",
+    # FMP stable-API client (systematic_trading.data.fmp) — prices + fundamentals.
+    # Lumibot pulls requests transitively, but we import it directly, so declare it.
+    "requests>=2.31",
 ]
 
 [project.scripts]

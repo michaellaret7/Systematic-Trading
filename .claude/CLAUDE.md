@@ -25,11 +25,13 @@ Other commands:
 Key pages (consult these directly — they cover most day-to-day work):
 
 - **Strategy methods** — https://lumibot.lumiwealth.com/strategy_methods.html — everything callable on `self` inside a strategy: orders (`create_order`, `submit_order`), data (`get_last_price`, `get_historical_prices`), positions, account state.
-- **Lifecycle methods** — https://lumibot.lumiwealth.com/lifecycle_methods.html — the hooks Lumibot calls (`initialize`, `on_trading_iteration`, `before_market_closes`, `on_filled_order`, `on_abrupt_closing`, …) and when each fires.
+- **Lifecycle methods** — https://lumibot.lumiwealth.com/lifecycle_methods.html — the hooks Lumibot calls (`initialize`, `on_trading_iteration`, `before_market_closes`, `on_filled_order`, `on_abrupt_closing`, …) and when each fires these are customizeable per stratgy.
 - **Strategy properties** — https://lumibot.lumiwealth.com/strategy_properties.html — attributes like `self.cash`, `self.portfolio_value`, `self.sleeptime`, `self.is_backtesting`, `self.minutes_before_closing`.
 - **Entities** — https://lumibot.lumiwealth.com/entities.html — the `Asset`, `Order`, `Position`, `Bars` objects that methods take and return.
 - **Alpaca broker** — https://lumibot.lumiwealth.com/brokers.alpaca.html — our broker: config dict shape, supported order types/sides, quirks.
 - **Examples** — https://lumibot.lumiwealth.com/examples.html — complete reference strategies showing idiomatic Lumibot patterns.
+
+**Important additional info** - To get a full overview/rundown of the lumibot library, read the LUMIBOT.md file in the .claude folder
 
 ## Architecture
 
