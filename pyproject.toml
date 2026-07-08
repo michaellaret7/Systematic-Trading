@@ -9,9 +9,13 @@ dependencies = [
     # Core infrastructure: backtesting + paper/live execution, native Alpaca broker.
     # Pulls in alpaca-py, pandas, numpy, polars, pyarrow, etc. transitively.
     "lumibot==4.5.63",
+    "numpy>=2.4.6",
+    "pandas>=2.3.3",
     # FMP stable-API client (systematic_trading.data.fmp) — prices + fundamentals.
     # Lumibot pulls requests transitively, but we import it directly, so declare it.
     "requests>=2.31",
+    "s3fs>=2026.6.0",
+    "torch>=2.12.1",
 ]
 
 [project.scripts]

@@ -218,6 +218,39 @@ class FMPClient:
 
         return _price_frame(rows)
 
+    def screener(
+        self,
+        market_cap_more_than: float | None = None,
+        price_more_than: float | None = None,
+        exchange: str | None = None,
+        limit: int = 5000,
+    ) -> pd.DataFrame:
+        """Company screener; one row per matching stock (symbol, marketCap, price, ...).
+
+        ``exchange`` is comma-separated, e.g. ``"NASDAQ,NYSE,AMEX"``. ETFs, funds,
+        and inactive listings are always excluded — this feeds a fundamental stock
+        screener, so only tradable common stocks belong in the universe.
+        """
+        params: dict = {
+            "isEtf": "false",
+            "isFund": "false",
+            "isActivelyTrading": "true",
+            "limit": limit,
+        }
+
+        if market_cap_more_than is not None:
+            params["marketCapMoreThan"] = int(market_cap_more_than)
+
+        if price_more_than is not None:
+            params["priceMoreThan"] = price_more_than
+
+        if exchange is not None:
+            params["exchange"] = exchange
+
+        rows = self._get("company-screener", params)
+
+        return pd.DataFrame(rows)
+
     def income_statement(
         self, symbol: str, period: str = "annual", limit: int = 40
     ) -> pd.DataFrame:
@@ -239,3 +272,11 @@ class FMPClient:
         joins, gate on the matching statement's ``acceptedDate`` instead.
         """
         return self._statements("ratios", symbol, period, limit)
+
+    def key_metrics(self, symbol: str, period: str = "annual", limit: int = 40) -> pd.DataFrame:
+        """Key metrics (per-share values, returns, yields), oldest first.
+
+        Like ratios, rows carry no filing timestamps; for point-in-time joins,
+        gate on the matching statement's ``acceptedDate`` instead.
+        """
+        return self._statements("key-metrics", symbol, period, limit)

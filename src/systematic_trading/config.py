@@ -45,5 +45,15 @@ def fmp_api_key() -> str:
     return _require("FMP_API_KEY")
 
 
+def s3_bucket() -> str:
+    """S3 bucket holding the fundamentals data repository.
+
+    The AWS credentials themselves (``AWS_ACCESS_KEY_ID`` etc.) use botocore's
+    standard names, so boto3/s3fs pick them up from the environment once
+    ``load_dotenv`` has run — only the bucket name needs an accessor.
+    """
+    return _require("S3_BUCKET")
+
+
 def is_paper() -> bool:
     return alpaca_config()["PAPER"]
