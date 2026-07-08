@@ -23,6 +23,8 @@ def add_metrics(df: pd.DataFrame) -> None:
     _add_balance_metrics(df)
     _add_growth_metrics(df)
     _add_reinvestment_metrics(df)
+    _add_payout_metrics(df)
+    _add_valuation_metrics(df)
 
 
 def _grouped(df: pd.DataFrame, column: str) -> SeriesGroupBy:
@@ -72,15 +74,17 @@ def _add_returns_metrics(df: pd.DataFrame) -> None:
     tax_rate = tax_rate.clip(0.0, TAX_RATE_CAP)
 
     df["nopat_ttm"] = df["ebit_ttm"] * (1.0 - tax_rate)
-    df["invested_capital"] = (
-        df["totalDebt"] + df["totalEquity"] - df["cashAndShortTermInvestments"]
-    )
+    df["invested_capital"] = df["totalDebt"] + df["totalEquity"] - df["cashAndShortTermInvestments"]
 
     avg_capital = (df["invested_capital"] + _shift(df, "invested_capital", 4)) / 2.0
     df["roic_ttm"] = _safe_ratio(df["nopat_ttm"], avg_capital)
 
     floor = _grouped(df, "roic_ttm").transform(lambda s: s.rolling(20, min_periods=16).min())
     df["roic_floor_5y"] = floor.where(_span_ok(df, 19))
+
+    # Novy-Marx gross profitability: gross profit per dollar of assets.
+    avg_assets = (df["totalAssets"] + _shift(df, "totalAssets", 4)) / 2.0
+    df["gross_profitability_ttm"] = _safe_ratio(df["grossProfit_ttm"], avg_assets)
 
 
 def _add_cash_quality_metrics(df: pd.DataFrame) -> None:
@@ -98,9 +102,7 @@ def _add_cash_quality_metrics(df: pd.DataFrame) -> None:
     df["accruals_ratio_ttm"] = _safe_ratio(accruals, avg_assets)
 
     df["dso_ttm"] = _safe_ratio(df["netReceivables"] * 365.0, df["revenue_ttm"])
-    df["dso_change_3y"] = (df["dso_ttm"] - _shift(df, "dso_ttm", 12)).where(
-        _span_ok(df, 12)
-    )
+    df["dso_change_3y"] = (df["dso_ttm"] - _shift(df, "dso_ttm", 12)).where(_span_ok(df, 12))
     df["sbc_to_revenue_ttm"] = _safe_ratio(df["stockBasedCompensation_ttm"], df["revenue_ttm"])
 
 
@@ -156,3 +158,24 @@ def _add_reinvestment_metrics(df: pd.DataFrame) -> None:
         lambda s: s.rolling(20, min_periods=16).std()
     )
     df["gross_margin_std_5y"] = margin_std.where(_span_ok(df, 19))
+
+
+def _add_payout_metrics(df: pd.DataFrame) -> None:
+    # Cash returned to owners: dividends plus net buybacks (issuance nets against
+    # repurchases). Both flows are statement outflows (negative), so flip the sign;
+    # a serial diluter goes negative, a cash hoarder sits near zero.
+    returned = -(df["netDividendsPaid"] + df["netStockIssuance"])
+
+    returned_5y = _grouped(df.assign(returned=returned), "returned").transform(
+        lambda s: s.rolling(20, min_periods=20).sum()
+    )
+    fcf_5y = _grouped(df, "freeCashFlow").transform(lambda s: s.rolling(20, min_periods=20).sum())
+
+    df["payout_to_fcf_5y"] = _safe_ratio(returned_5y, fcf_5y).where(_span_ok(df, 19))
+
+
+def _add_valuation_metrics(df: pd.DataFrame) -> None:
+    # Context only — never filtered or scored. Quality screen, not a value screen;
+    # these exist so the champion list can be sorted by cheapness afterwards.
+    df["fcf_yield_ttm"] = _safe_ratio(df["freeCashFlow_ttm"], df["marketCap"])
+    df["ev_to_ebitda_ttm"] = _safe_ratio(df["enterpriseValue"], df["ebitda_ttm"])

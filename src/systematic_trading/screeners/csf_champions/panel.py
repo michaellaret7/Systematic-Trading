@@ -8,6 +8,7 @@ from systematic_trading.screeners.csf_champions.constants import (
     BALANCE_COLUMNS,
     CASHFLOW_COLUMNS,
     INCOME_COLUMNS,
+    KEY_METRICS_COLUMNS,
 )
 from systematic_trading.screeners.csf_champions.metrics import add_metrics
 
@@ -22,8 +23,13 @@ def build_panel(
     income: pd.DataFrame,
     balance: pd.DataFrame,
     cashflow: pd.DataFrame,
+    key_metrics: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Compute one look-ahead-safe metrics row per symbol and fiscal quarter."""
+    """Compute one look-ahead-safe metrics row per symbol and fiscal quarter.
+
+    The three statements are joined inner (a quarter needs all of them); key
+    metrics joins left, so quarters it doesn't cover just carry NaN valuations.
+    """
     statements = {
         "income": income[INCOME_COLUMNS],
         "balance": balance[BALANCE_COLUMNS],
@@ -31,6 +37,7 @@ def build_panel(
     }
 
     df = _join_statements(statements)
+    df = df.merge(key_metrics[KEY_METRICS_COLUMNS], on=["symbol", "date"], how="left")
     df = df.sort_values(["symbol", "date"], ignore_index=True)
 
     add_metrics(df)

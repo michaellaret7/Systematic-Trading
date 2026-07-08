@@ -22,6 +22,8 @@ PASSING_METRICS = {
     "share_change_3y": 0.01,
     "incremental_roic_5y": 0.18,
     "gross_margin_std_5y": 0.03,
+    "gross_profitability_ttm": 0.40,
+    "payout_to_fcf_5y": 0.60,
 }
 
 
@@ -135,10 +137,20 @@ def test_build_panel_marks_rows_available_after_all_statements_arrive() -> None:
             "acquisitionsNet": -1.0,
             "stockBasedCompensation": 1.0,
             "depreciationAndAmortization": 3.0,
+            "netDividendsPaid": -8.0,
+            "netStockIssuance": -2.0,
         },
     )
+    key_metrics = statement_frame(
+        dates,
+        0,
+        {
+            "marketCap": 1000.0,
+            "enterpriseValue": 1005.0,
+        },
+    ).drop(columns="acceptedDate")
 
-    panel = build_panel(income, balance, cashflow)
+    panel = build_panel(income, balance, cashflow, key_metrics)
 
     assert panel.loc[0, "available_from"] == dates[0] + pd.Timedelta(days=40)
     assert {"symbol", "date", "available_from", "roic_ttm", "revenue_cagr_5y"}.issubset(

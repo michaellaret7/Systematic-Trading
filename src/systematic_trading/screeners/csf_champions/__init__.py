@@ -5,6 +5,7 @@ from systematic_trading.screeners.csf_champions.constants import (
     CASHFLOW_COLUMNS,
     DEFAULT_CRITERIA,
     INCOME_COLUMNS,
+    KEY_METRICS_COLUMNS,
     PANEL_KEY,
     SCORE_WEIGHTS,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "CASHFLOW_COLUMNS",
     "DEFAULT_CRITERIA",
     "INCOME_COLUMNS",
+    "KEY_METRICS_COLUMNS",
     "PANEL_KEY",
     "SCORE_WEIGHTS",
     "build_panel",

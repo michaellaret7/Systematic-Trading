@@ -38,6 +38,17 @@ CASHFLOW_COLUMNS = [
     "acquisitionsNet",
     "stockBasedCompensation",
     "depreciationAndAmortization",
+    "netDividendsPaid",
+    "netStockIssuance",
+]
+
+# Joined for valuation context only; key-metrics rows carry no acceptedDate, but
+# period-end market cap was public at filing time, so no look-ahead is introduced.
+KEY_METRICS_COLUMNS = [
+    "symbol",
+    "date",
+    "marketCap",
+    "enterpriseValue",
 ]
 
 TTM_FLOWS = [
@@ -85,6 +96,8 @@ DEFAULT_CRITERIA: dict[str, float] = {
 SCORE_WEIGHTS: dict[str, int] = {
     "roic_ttm": 1,
     "incremental_roic_5y": 1,
+    "gross_profitability_ttm": 1,
+    "payout_to_fcf_5y": 1,
     "fcf_margin_ttm": 1,
     "income_quality_ttm": 1,
     "revenue_cagr_5y": 1,

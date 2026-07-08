@@ -6,7 +6,7 @@ excess cash at attractive incremental returns — the drivers of long-run compou
 test is measured over multi-year windows; nothing in this screen is a single-quarter snapshot.
 
 **Code:** `src/systematic_trading/screeners/csf_champions/`
-**Build:** `uv run python scripts/build_cashflow_champions.py` (rerun after each
+**Build:** `uv run python -m systematic_trading.screeners.csf_champions.build` (rerun after each
 `push_fundamentals.py` refresh)
 **Output:** `s3://<S3_BUCKET>/screeners/cashflow_champions.parquet`
 
@@ -15,17 +15,18 @@ test is measured over multi-year windows; nothing in this screen is a single-qua
 The screener is split into a *panel build* and a *filter*:
 
 1. `build_panel` joins the three quarterly statement files (income, balance, cash flow) on
-   `(symbol, date)` and computes, for every symbol at every fiscal quarter end, trailing-
-   twelve-month (TTM) levels plus 3–5 year trend and consistency statistics. Each row carries
-   `available_from` — the latest SEC `acceptedDate` across the three statements — so the panel
-   is point-in-time: screening "as of 2024-06-30" only sees numbers that were public then.
+   `(symbol, date)`, left-joins key metrics for valuation context, and computes, for every
+   symbol at every fiscal quarter end, trailing-twelve-month (TTM) levels plus 3–5 year trend
+   and consistency statistics. Each row carries `available_from` — the latest SEC
+   `acceptedDate` across the three statements — so the panel is point-in-time: screening
+   "as of 2024-06-30" only sees numbers that were public then.
 2. `screen(panel, as_of, criteria)` takes each symbol's latest visible row, drops stale
    listings (no filing within 270 days), applies the pillar filters, and ranks passers by a
    cross-sectional percentile composite (`score`, 0–100).
 
-All ratios are computed from raw statements, never taken from the FMP `ratios`/`key_metrics`
-files: FMP's quarterly ratios are **single-quarter** figures, not TTM, and quarterly flow
-ratios are distorted by seasonality — the exact snapshot trap this screener exists to avoid.
+Operating and quality ratios are computed from raw statements, never taken from the FMP
+`ratios` files: FMP's quarterly ratios are **single-quarter** figures, not TTM, and quarterly
+flow ratios are distorted by seasonality — the exact snapshot trap this screener exists to avoid.
 
 ## Pillars, formulas, and default thresholds
 
@@ -108,15 +109,28 @@ closes the SBC loophole (SBC is added back to CFO but shows up in the share coun
 | `incremental_roic_5y` | ΔNOPAT_ttm ÷ Δinvested capital over 20 quarters; only computed when capital grew > 2% of its base (near-zero denominators explode on noise — Wall Street Prep/Mauboussin ROIIC guidance) |
 | `reinvestment_rate_ttm` | (capex + acquisition outflows)_ttm ÷ CFO_ttm |
 | `gross_margin_std_5y` | stddev of TTM gross margin over 20 quarters (stability ≈ moat; MSCI Quality treats low variability as a first-class factor) |
+| `gross_profitability_ttm` | gross profit_ttm ÷ avg total assets — Novy-Marx GP/A, the strongest single academic quality predictor |
+| `payout_to_fcf_5y` | (dividends + net buybacks, net of issuance) ÷ FCF, both summed over 20 quarters — the AQR QMJ payout leg; serial diluters go negative, hoarders sit near zero |
 
 These rank companies but don't gate them: shrinking-capital compounders (heavy buybacks) have
 no meaningful incremental ROIC and shouldn't fail for it.
 
+### 7. Valuation context (never filtered, never scored)
+
+| Metric | Formula |
+|---|---|
+| `fcf_yield_ttm` | FCF_ttm ÷ market cap at fiscal quarter end |
+| `ev_to_ebitda_ttm` | enterprise value ÷ EBITDA_ttm |
+
+Market cap and enterprise value join from the key-metrics file (left join — quarters it
+doesn't cover carry NaN valuations). This is deliberately a quality screen, not a value
+screen; these columns exist so the champion list can be sorted by cheapness afterwards.
+
 ## Composite score
 
-Rank-percentile average (0–100) over: ROIC, incremental ROIC, FCF margin, income quality,
-revenue CAGR, FCF/share CAGR (higher better) and accruals, net debt/EBITDA, gross-margin
-volatility, SBC/revenue (lower better). Rank-based scoring follows O'Shaughnessy (composites
+Rank-percentile average (0–100) over: ROIC, incremental ROIC, gross profitability, payout
+discipline, FCF margin, income quality, revenue CAGR, FCF/share CAGR (higher better) and
+accruals, net debt/EBITDA, gross-margin volatility, SBC/revenue (lower better). Rank-based scoring follows O'Shaughnessy (composites
 beat single metrics ~82% of the time) and AQR's Quality-Minus-Junk construction, and is
 naturally robust to the fat tails hard z-scores choke on. The architecture — few hard gates
 for non-negotiables, everything else ranked — is the same hybrid S&P uses for the FCF
@@ -130,9 +144,11 @@ names, inside the 30–100 sanity band.
   banks/insurers; in practice they fail the interest-coverage and cash-conversion gates, but
   the panel has no sector column to exclude them structurally. If FMP profile data is added
   later, exclude financials and REITs outright.
-- **History depth gates the backtest window.** The fundamentals files hold ~10 years; the
-  5-year consistency windows need ~6 years of warm-up, so `screen(as_of=...)` produces useful
-  cross-sections from roughly 2022 onward (51 names at 2024-06-30, zero before ~2022).
+- **History depth gates the backtest window.** The fundamentals files hold ~30 years
+  (1985+); after the ~6-year warm-up for the 5-year windows, `screen(as_of=...)` produces
+  useful cross-sections from the mid-1990s onward for long-listed names. Backtests remain
+  survivorship-biased: the universe is today's $2bn+ screener output, so early cross-sections
+  only contain companies that survived to the present.
 - **Capital-light ROIC is numerically extreme.** VEEV/MANH/MEDP-type businesses run ROIC of
   300–600% because invested capital net of cash is tiny. The values are real, and percentile
   ranking neutralizes the magnitude; just don't read the raw ratio as a comparable intensity.

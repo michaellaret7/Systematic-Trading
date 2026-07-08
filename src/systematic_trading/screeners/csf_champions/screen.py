@@ -83,3 +83,10 @@ def _passes(snapshot: pd.DataFrame, criteria: dict[str, float]) -> pd.Series:
     ]
 
     return pd.Series(np.logical_and.reduce(checks), index=snapshot.index)
+
+
+if __name__ == "__main__":
+    panel = load_panel()
+    
+    champions = screen(panel, as_of="2020-01-01")
+    print(champions.head(20)[["symbol", "score"]])
