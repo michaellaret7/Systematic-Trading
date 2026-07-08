@@ -42,6 +42,7 @@ uv run pytest
 src/systematic_trading/
   config.py        # env/secrets; alpaca_config() → Lumibot broker dict
   strategies/      # Lumibot Strategy subclasses (same class backtest + live)
+  screeners/       # reusable stock screens consumed by strategies
   agents/          # LLM / tool-calling decision layer (broker-agnostic)
   portfolios/      # sizing, risk budgeting, signal → target weights
   data/            # supplementary data adapters (FMP lives here)

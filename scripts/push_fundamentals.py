@@ -1,7 +1,7 @@
 """Build the statement files of the S3 fundamentals repository.
 
 Universe: FMP company screener — market cap > $2bn, price > $5, common stocks on
-NASDAQ / NYSE / AMEX. For each requested period and statement type, fetch 10
+NASDAQ / NYSE / AMEX. For each requested period and statement type, fetch 30
 years of data for every symbol and write the whole universe in one shot to
 s3://<S3_BUCKET>/fundamentals/<statement>_<period>.parquet.
 
@@ -20,6 +20,7 @@ import sys
 import time
 
 import pandas as pd
+import requests
 
 from systematic_trading.config import s3_bucket
 from systematic_trading.data.fmp import FMPClient
@@ -31,6 +32,10 @@ EXCHANGES = "NASDAQ,NYSE,AMEX"
 RETRIES = 3
 RETRY_WAIT_S = 5.0  # transient FMP errors (rate limits) clear quickly
 
+# RuntimeError covers FMP-level errors from FMPClient; RequestException covers
+# network-level failures (connection resets, timeouts) that long runs will hit.
+TRANSIENT_ERRORS = (RuntimeError, requests.RequestException)
+
 # Statement name (file prefix) -> FMPClient method that fetches it.
 STATEMENTS: dict[str, str] = {
     "income": "income_statement",
@@ -40,10 +45,10 @@ STATEMENTS: dict[str, str] = {
     "key_metrics": "key_metrics",
 }
 
-# Period (file suffix, also the FMP param) -> row limit covering 10 years.
+# Period (file suffix, also the FMP param) -> row limit covering 30 years.
 PERIODS: dict[str, int] = {
-    "quarter": 40,
-    "annual": 10,
+    "quarter": 120,
+    "annual": 30,
 }
 
 #     ================================
@@ -67,7 +72,7 @@ def fetch_with_retry(client: FMPClient, method: str, symbol: str, period: str) -
     for attempt in range(1, RETRIES + 1):
         try:
             return getattr(client, method)(symbol, period=period, limit=PERIODS[period])
-        except RuntimeError as error:
+        except TRANSIENT_ERRORS as error:
             if attempt == RETRIES:
                 raise
 
@@ -89,7 +94,7 @@ def push_statement(client: FMPClient, statement: str, period: str, symbols: list
     for i, symbol in enumerate(symbols, start=1):
         try:
             frame = fetch_with_retry(client, method, symbol, period)
-        except RuntimeError as error:
+        except TRANSIENT_ERRORS as error:
             failures.append(symbol)
             print(f"  {symbol}: giving up ({error})")
             continue

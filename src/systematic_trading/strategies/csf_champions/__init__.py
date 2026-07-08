@@ -1,0 +1,1 @@
+"""Cashflow Champions strategy package."""
