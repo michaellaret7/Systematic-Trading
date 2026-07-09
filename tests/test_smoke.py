@@ -12,6 +12,7 @@ def test_lumibot_imports():
     from lumibot.strategies import Strategy  # noqa: F401
     from lumibot.traders import Trader  # noqa: F401
 
+
 def test_alpaca_config_shape(monkeypatch):
     monkeypatch.setenv("ALPACA_API_KEY", "test-key")
     monkeypatch.setenv("ALPACA_API_SECRET", "test-secret")

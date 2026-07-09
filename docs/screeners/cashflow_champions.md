@@ -6,9 +6,10 @@ excess cash at attractive incremental returns — the drivers of long-run compou
 test is measured over multi-year windows; nothing in this screen is a single-quarter snapshot.
 
 **Code:** `src/systematic_trading/screeners/csf_champions/`
-**Build:** `uv run python -m systematic_trading.screeners.csf_champions.build` (rerun after each
-`push_fundamentals.py` refresh)
-**Output:** `s3://<S3_BUCKET>/screeners/cashflow_champions.parquet`
+**Build:** `uv run python -m systematic_trading.screeners.panels.fundamentals.build` (rerun
+after each `push_fundamentals.py` refresh)
+**Input:** `s3://<S3_BUCKET>/screeners/fundamentals_panel.parquet` (the shared metrics panel)
+**Layering:** see `docs/screeners/architecture.md` for the panels/screeners/shared split.
 
 ## Architecture
 
@@ -28,6 +29,13 @@ Operating and quality ratios are computed from raw statements, never taken from 
 `ratios` files: FMP's quarterly ratios are **single-quarter** figures, not TTM, and quarterly
 flow ratios are distorted by seasonality — the exact snapshot trap this screener exists to avoid.
 
+The panel is **shared infrastructure** owned by `screeners/panels/fundamentals/`: it also
+carries the distress metrics and `sector` column consumed by the Junk Shorts screen
+(`docs/screeners/junk_shorts.md`), and the generic screen machinery (visible-snapshot,
+staleness, criteria gating, rank-composite scoring) lives in `screeners/shared/screen.py`,
+used by every screener. This package holds only the champion opinions (criteria, score
+weights) and a thin `screen()`.
+
 ## Pillars, formulas, and default thresholds
 
 NaN metrics fail their filter, so names with short or gappy history drop out instead of
@@ -38,7 +46,7 @@ window is implausible (reporting gap guard: `lags × 98 + 40` days).
 
 | Metric | Formula | Default |
 |---|---|---|
-| `roic_ttm` | NOPAT ÷ avg invested capital; NOPAT = EBIT_ttm × (1 − effective tax rate, capped at 50%); invested capital = total debt + total equity − cash & short-term investments (financing approach, excess cash netted out) | ≥ 15% |
+| `roic_ttm` | NOPAT ÷ avg invested capital; NOPAT = EBIT_ttm × (1 − effective tax rate, capped at 50%, 0 for pre-tax loss-makers so ROIC stays defined and keeps EBIT's sign); invested capital = total debt + total equity − cash & short-term investments (financing approach, excess cash netted out) | ≥ 15% |
 | `roic_floor_5y` | minimum TTM ROIC over the trailing 20 quarters | ≥ 10% |
 
 The 15% bar is the practitioner consensus (Fundsmith-style ROCE > 15%, Compounding Quality
@@ -141,9 +149,10 @@ names, inside the 30–100 sanity band.
 ## Known limitations
 
 - **Financials are not excluded.** ROIC, EBITDA, and accruals are ill-defined for
-  banks/insurers; in practice they fail the interest-coverage and cash-conversion gates, but
-  the panel has no sector column to exclude them structurally. If FMP profile data is added
-  later, exclude financials and REITs outright.
+  banks/insurers; in practice they fail the interest-coverage and cash-conversion gates. The
+  panel now carries a `sector` column (merged at build time from the FMP company screener,
+  used by the Junk Shorts sector exclusion); the champions gates have not needed it, but it
+  is available if structural exclusion ever becomes necessary.
 - **History depth gates the backtest window.** The fundamentals files hold ~30 years
   (1985+); after the ~6-year warm-up for the 5-year windows, `screen(as_of=...)` produces
   useful cross-sections from the mid-1990s onward for long-listed names. Backtests remain
