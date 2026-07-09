@@ -1,4 +1,4 @@
-"""Panel-agnostic screen machinery: point-in-time snapshots, gating, and scoring.
+﻿"""Panel-agnostic screen machinery: point-in-time snapshots, gating, and scoring.
 
 Each screener module owns its opinions (which metrics to gate, thresholds,
 score weights, sector exclusions); this module owns the mechanics that are
@@ -31,16 +31,25 @@ def run_screen(
     sectors, scores the cross-section, and returns rows passing every
     criterion, ranked by score descending.
     """
+    # The "pretend it's this date" moment: the caller's as_of, else the newest filing (now).
     cutoff = pd.Timestamp(as_of) if as_of is not None else panel["filingDate"].max()
 
+    # Collapse history to one row per symbol: latest filing public at the cutoff, dead filers dropped.
     snapshot = cross_section(panel, cutoff)
 
+    # Only bother with sector filtering if the screener asked for it.
+    # If requested, remove banned sectors (and, if requested, rows with no sector info at all).
     if excluded_sectors or drop_missing_sector:
         snapshot = drop_sectors(snapshot, excluded_sectors, drop_missing_sector)
 
+    # Score every company against the full cross-section (before gating, so ranks mean
+    # "percentile of the market" and stay comparable across screens and dates).
     snapshot["score"] = composite_score(snapshot, score_weights)
-    matches = snapshot[passes(snapshot, criteria)]
+    
+    # Keep only companies clearing every _min/_max threshold gate.
+    matches = snapshot[passes_gates(snapshot, criteria)]
 
+    # Survivors, best score first, index renumbered 0..n.
     return matches.sort_values("score", ascending=False, ignore_index=True)
 
 
@@ -87,7 +96,7 @@ def composite_score(snapshot: pd.DataFrame, score_weights: dict[str, int]) -> pd
     return (ranks.mean(axis=1, skipna=True) * 100.0).round(1)
 
 
-def passes(snapshot: pd.DataFrame, criteria: dict[str, float]) -> pd.Series:
+def passes_gates(snapshot: pd.DataFrame, criteria: dict[str, float]) -> pd.Series:
     """True where a row satisfies every criterion; NaN metrics fail their check.
 
     Criterion keys name a metric column plus a ``_min``/``_max`` suffix, e.g.

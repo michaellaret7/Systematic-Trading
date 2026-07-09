@@ -1,4 +1,4 @@
-"""Screen machinery for screener.
+﻿"""Screen machinery for screener.
 
 Small synthetic panel with known dates and metrics; checks the point-in-time
 cross-section, staleness drop, criteria gating (including NaN-fails), scoring
@@ -13,7 +13,7 @@ from systematic_trading.screener.fundamentals.screen import (
     composite_score,
     cross_section,
     drop_sectors,
-    passes,
+    passes_gates,
     run_screen,
 )
 
@@ -71,7 +71,7 @@ def test_cross_section_drops_stale_symbols():
 def test_passes_min_max_and_nan():
     snapshot = pd.DataFrame({"roic_ttm": [0.20, 0.10, np.nan], "debt": [1.0, 5.0, 1.0]})
 
-    ok = passes(snapshot, {"roic_ttm_min": 0.15, "debt_max": 2.0})
+    ok = passes_gates(snapshot, {"roic_ttm_min": 0.15, "debt_max": 2.0})
 
     assert ok.tolist() == [True, False, False]  # NaN fails its check
 
@@ -80,7 +80,7 @@ def test_passes_rejects_malformed_key():
     snapshot = pd.DataFrame({"roic_ttm": [0.2]})
 
     with pytest.raises(ValueError, match="_min' or '_max"):
-        passes(snapshot, {"roic_ttm": 0.15})
+        passes_gates(snapshot, {"roic_ttm": 0.15})
 
 
 def test_composite_score_direction():

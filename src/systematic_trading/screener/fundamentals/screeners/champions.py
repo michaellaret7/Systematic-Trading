@@ -70,4 +70,3 @@ def screen(
 if __name__ == "__main__":
     champions = screen()
     print(champions.head(10))
-    
