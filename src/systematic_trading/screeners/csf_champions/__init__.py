@@ -1,27 +1,15 @@
 """Cashflow Champions screener package."""
 
 from systematic_trading.screeners.csf_champions.constants import (
-    BALANCE_COLUMNS,
-    CASHFLOW_COLUMNS,
     DEFAULT_CRITERIA,
-    INCOME_COLUMNS,
-    KEY_METRICS_COLUMNS,
-    PANEL_KEY,
+    PREVIEW_COLUMNS,
     SCORE_WEIGHTS,
 )
-from systematic_trading.screeners.csf_champions.panel import build_panel
-from systematic_trading.screeners.csf_champions.screen import load_panel, panel_uri, screen
+from systematic_trading.screeners.csf_champions.screen import screen
 
 __all__ = [
-    "BALANCE_COLUMNS",
-    "CASHFLOW_COLUMNS",
     "DEFAULT_CRITERIA",
-    "INCOME_COLUMNS",
-    "KEY_METRICS_COLUMNS",
-    "PANEL_KEY",
+    "PREVIEW_COLUMNS",
     "SCORE_WEIGHTS",
-    "build_panel",
-    "load_panel",
-    "panel_uri",
     "screen",
 ]

@@ -1,79 +1,4 @@
-"""Configuration for the Cashflow Champions panel and screen."""
-
-PANEL_KEY = "screeners/cashflow_champions.parquet"
-
-INCOME_COLUMNS = [
-    "symbol",
-    "date",
-    "acceptedDate",
-    "revenue",
-    "grossProfit",
-    "ebit",
-    "interestExpense",
-    "incomeTaxExpense",
-    "incomeBeforeTax",
-    "netIncome",
-    "weightedAverageShsOutDil",
-]
-
-BALANCE_COLUMNS = [
-    "symbol",
-    "date",
-    "acceptedDate",
-    "totalAssets",
-    "totalDebt",
-    "netDebt",
-    "totalEquity",
-    "cashAndShortTermInvestments",
-    "netReceivables",
-]
-
-CASHFLOW_COLUMNS = [
-    "symbol",
-    "date",
-    "acceptedDate",
-    "operatingCashFlow",
-    "capitalExpenditure",
-    "freeCashFlow",
-    "acquisitionsNet",
-    "stockBasedCompensation",
-    "depreciationAndAmortization",
-    "netDividendsPaid",
-    "netStockIssuance",
-]
-
-# Joined for valuation context only; key-metrics rows carry no acceptedDate, but
-# period-end market cap was public at filing time, so no look-ahead is introduced.
-KEY_METRICS_COLUMNS = [
-    "symbol",
-    "date",
-    "marketCap",
-    "enterpriseValue",
-]
-
-TTM_FLOWS = [
-    "revenue",
-    "grossProfit",
-    "ebit",
-    "interestExpense",
-    "incomeTaxExpense",
-    "incomeBeforeTax",
-    "netIncome",
-    "operatingCashFlow",
-    "capitalExpenditure",
-    "freeCashFlow",
-    "acquisitionsNet",
-    "stockBasedCompensation",
-    "depreciationAndAmortization",
-]
-
-# A window of n quarter-lags is only trusted if its calendar span is plausible.
-MAX_SPAN_DAYS_PER_LAG = 98
-MAX_SPAN_SLACK_DAYS = 40
-
-MAX_STALENESS_DAYS = 270
-TAX_RATE_CAP = 0.50
-INCREMENTAL_CAPITAL_FLOOR = 0.02
+"""Configuration for the Cashflow Champions screen."""
 
 DEFAULT_CRITERIA: dict[str, float] = {
     "roic_ttm_min": 0.15,
@@ -107,3 +32,14 @@ SCORE_WEIGHTS: dict[str, int] = {
     "gross_margin_std_5y": -1,
     "sbc_to_revenue_ttm": -1,
 }
+
+# Columns shown in the post-build preview.
+PREVIEW_COLUMNS = [
+    "symbol",
+    "score",
+    "roic_ttm",
+    "fcf_margin_ttm",
+    "revenue_cagr_5y",
+    "net_debt_to_ebitda",
+    "fcf_ps_cagr_5y",
+]
