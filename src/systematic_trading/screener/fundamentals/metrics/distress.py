@@ -5,6 +5,7 @@ import pandas as pd
 from systematic_trading.screener.fundamentals.metrics.helpers import (
     LAGS_3Y,
     LAGS_5Y,
+    avg_4q,
     rolling,
     safe_ratio,
     shift,
@@ -21,7 +22,7 @@ def add_distress(panel: pd.DataFrame) -> pd.DataFrame:
 
     panel["debt_to_assets"] = safe_ratio(panel["totalDebt"], panel["totalAssets"])
 
-    avg_assets = (panel["totalAssets"] + shift(panel, "totalAssets", 4)) / 2.0
+    avg_assets = avg_4q(panel, "totalAssets")
     panel["fcf_to_assets_ttm"] = safe_ratio(panel["freeCashFlow_ttm"], avg_assets)
 
     # Debt added over three years, scaled by the asset base it was added to.

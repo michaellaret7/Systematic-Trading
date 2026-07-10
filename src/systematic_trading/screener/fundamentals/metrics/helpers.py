@@ -43,6 +43,13 @@ def span_ok(panel: pd.DataFrame, lags: int) -> pd.Series:
     return span_days <= limit
 
 
+def avg_4q(panel: pd.DataFrame, column: str) -> pd.Series:
+    """Average of a balance-sheet level now and four quarters ago, voided across filing gaps."""
+    average = (panel[column] + shift(panel, column, 4)) / 2.0
+
+    return average.where(span_ok(panel, 4))
+
+
 def safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
     """Division that yields NaN wherever the denominator is not positive."""
     return numerator / denominator.where(denominator > 0)

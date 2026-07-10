@@ -6,6 +6,7 @@ import pandas as pd
 from systematic_trading.screener.fundamentals.metrics.helpers import (
     LAGS_3Y,
     LAGS_5Y,
+    avg_4q,
     safe_ratio,
     shift,
     span_ok,
@@ -23,7 +24,7 @@ def add_cash_quality(panel: pd.DataFrame) -> pd.DataFrame:
     )
     panel["fcf_positive_quarters_5y"] = streak.where(span_ok(panel, LAGS_5Y - 1))
 
-    avg_assets = (panel["totalAssets"] + shift(panel, "totalAssets", 4)) / 2.0
+    avg_assets = avg_4q(panel, "totalAssets")
     accruals = panel["netIncome_ttm"] - panel["operatingCashFlow_ttm"]
     panel["accruals_ratio_ttm"] = safe_ratio(accruals, avg_assets)
 

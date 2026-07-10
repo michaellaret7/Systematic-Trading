@@ -101,17 +101,21 @@ def test_filing_gap_voids_ttm():
     assert panel.loc[4:6, "revenue_ttm"].isna().all()
     assert panel.loc[7, "revenue_ttm"] == pytest.approx(400.0)
 
+    # The 4-quarter capital average still reaches across the gap, so ROIC stays NaN.
+    assert np.isnan(panel.loc[7, "roic_ttm"])
+
 
 def test_returns_metrics():
     panel = compute_metrics(make_panel())
     prof = last_row(panel, "PROF")
 
-    # tax rate 16/72, NOPAT = 80 * (1 - 16/72), avg invested capital = 100 + 200 - 50
+    # tax rate 16/72, NOPAT = 80 * (1 - 16/72); invested capital subtracts only
+    # excess cash: 100 + 200 - (50 - 0.02 * 400) = 258
     expected_nopat = 80.0 * (1.0 - 16.0 / 72.0)
 
     assert prof["nopat_ttm"] == pytest.approx(expected_nopat)
-    assert prof["invested_capital"] == pytest.approx(250.0)
-    assert prof["roic_ttm"] == pytest.approx(expected_nopat / 250.0)
+    assert prof["invested_capital"] == pytest.approx(258.0)
+    assert prof["roic_ttm"] == pytest.approx(expected_nopat / 258.0)
     assert prof["roic_floor_5y"] == pytest.approx(prof["roic_ttm"])
     assert prof["gross_profitability_ttm"] == pytest.approx(240.0 / 400.0)
 
@@ -122,7 +126,7 @@ def test_loss_maker_stays_defined():
     loss = last_row(panel, "LOSS")
 
     assert loss["nopat_ttm"] == pytest.approx(-80.0)
-    assert loss["roic_ttm"] == pytest.approx(-80.0 / 250.0)
+    assert loss["roic_ttm"] == pytest.approx(-80.0 / 258.0)
     assert np.isnan(loss["net_debt_to_ebitda"])  # EBITDA -60 -> multiple is meaningless
     assert loss["interest_coverage"] == pytest.approx(-80.0 / 8.0)
 
