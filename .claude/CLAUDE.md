@@ -77,7 +77,7 @@ Tunables go in the class-level `parameters` dict (Lumibot convention), not modul
 
 - **Live/paper:** Alpaca is both broker and price feed — Lumibot streams it automatically. `self.get_last_price()` / `self.get_historical_prices()` just work.
 - **Backtest:** `AlpacaBacktesting` (same keys as live). Other Lumibot data sources (Yahoo, `PandasDataBacktesting`, ThetaData via the `thetadata` extra) are options when needed.
-- **FMP is NOT a Lumibot data source.** Financial Modeling Prep is enrichment (fundamentals, macro) called directly from strategy/agent logic via `systematic_trading.data.fmp.FMPClient`, alongside Alpaca prices.
+- **FMP is NOT a Lumibot data source.** Financial Modeling Prep is enrichment (fundamentals, macro) called directly from strategy/agent logic via `systematic_trading.data.providers.fmp.FMPClient`, alongside Alpaca prices.
 
 ### Agents
 

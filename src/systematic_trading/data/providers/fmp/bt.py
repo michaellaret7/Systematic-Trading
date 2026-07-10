@@ -28,7 +28,7 @@ from lumibot.constants import LUMIBOT_CACHE_FOLDER
 from lumibot.data_sources import PandasData
 from lumibot.entities import Asset, Data
 
-from systematic_trading.data.fmp.live import FMPClient
+from systematic_trading.data.providers.fmp.live import FMPClient
 
 # Lumibot's Data entity only accepts minute/hour/day; map the intraday ones to the
 # matching FMP increment ("day" routes to the daily EOD endpoint instead).

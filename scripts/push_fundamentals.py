@@ -23,7 +23,7 @@ import pandas as pd
 import requests
 
 from systematic_trading.config import s3_bucket
-from systematic_trading.data.fmp import FMPClient
+from systematic_trading.data.providers.fmp import FMPClient
 
 MARKET_CAP_FLOOR = 2_000_000_000
 PRICE_FLOOR = 5

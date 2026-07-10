@@ -6,12 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 authors = [{ name = "Michael Laret", email = "michaellaret7@gmail.com" }]
 dependencies = [
+    "agent-harness",
     # Core infrastructure: backtesting + paper/live execution, native Alpaca broker.
     # Pulls in alpaca-py, pandas, numpy, polars, pyarrow, etc. transitively.
     "lumibot==4.5.63",
     "numpy>=2.4.6",
     "pandas>=2.3.3",
-    # FMP stable-API client (systematic_trading.data.fmp) — prices + fundamentals.
+    # FMP stable-API client (systematic_trading.data.providers.fmp) — prices + fundamentals.
     # Lumibot pulls requests transitively, but we import it directly, so declare it.
     "requests>=2.31",
     "s3fs>=2026.6.0",
@@ -48,3 +49,6 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+agent-harness = { git = "https://github.com/michaellaret7/Agent-Harness", subdirectory = "packages/agent_harness" }

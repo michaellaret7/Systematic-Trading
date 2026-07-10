@@ -14,7 +14,7 @@ data refreshes:
 
 import pandas as pd
 
-from systematic_trading.data.fmp import FMPClient
+from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.screener.fundamentals.data import (
     load_statement,
     panel_uri,

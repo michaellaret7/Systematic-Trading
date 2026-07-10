@@ -57,4 +57,4 @@ tests/             # smoke tests
 - **Backtest:** pick a Lumibot data source (Yahoo=daily/free, Alpaca=intraday,
   `PandasDataBacktesting`=your own files).
 - **FMP** is *not* a Lumibot data source. It's enrichment (fundamentals, macro) you
-  call yourself via `systematic_trading.data.fmp.FMPClient` alongside Alpaca prices.
+  call yourself via `systematic_trading.data.providers.fmp.FMPClient` alongside Alpaca prices.
