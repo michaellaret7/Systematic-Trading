@@ -13,16 +13,20 @@ FLOW_COLUMNS = [
     "revenue",
     "grossProfit",
     "ebit",
+    "operatingIncome",
     "interestExpense",
     "incomeTaxExpense",
     "incomeBeforeTax",
     "netIncome",
+    "researchAndDevelopmentExpenses",
     "operatingCashFlow",
     "capitalExpenditure",
     "freeCashFlow",
     "acquisitionsNet",
     "stockBasedCompensation",
     "depreciationAndAmortization",
+    "incomeTaxesPaid",
+    "interestPaid",
 ]
 
 

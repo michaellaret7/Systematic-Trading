@@ -20,10 +20,12 @@ BASE_ROW = {
     "revenue": 100.0,
     "grossProfit": 60.0,
     "ebit": 20.0,
+    "operatingIncome": 18.0,
     "interestExpense": 0.0,
     "incomeTaxExpense": 4.0,
     "incomeBeforeTax": 18.0,
     "netIncome": 14.0,
+    "researchAndDevelopmentExpenses": 4.0,
     "weightedAverageShsOutDil": 10.0,
     "operatingCashFlow": 22.0,
     "capitalExpenditure": -8.0,
@@ -33,15 +35,23 @@ BASE_ROW = {
     "depreciationAndAmortization": 5.0,
     "netDividendsPaid": -6.0,
     "netStockIssuance": -2.0,
+    "incomeTaxesPaid": 3.0,
+    "interestPaid": 0.0,
     "cashAndShortTermInvestments": 50.0,
+    "goodwill": 80.0,
     "totalAssets": 400.0,
     "totalCurrentAssets": 120.0,
     "totalCurrentLiabilities": 60.0,
     "totalDebt": 100.0,
+    "shortTermDebt": 20.0,
     "netDebt": 50.0,
     "totalEquity": 200.0,
+    "totalLiabilities": 200.0,
+    "retainedEarnings": 150.0,
     "netReceivables": 40.0,
     "inventory": 30.0,
+    "accountPayables": 25.0,
+    "deferredRevenue": 10.0,
     "marketCap": 1000.0,
     "enterpriseValue": 1050.0,
 }
@@ -50,10 +60,12 @@ LOSS_OVERRIDES = {
     "ebit": -20.0,
     "incomeBeforeTax": -18.0,
     "incomeTaxExpense": 0.0,
+    "incomeTaxesPaid": 0.0,
     "netIncome": -14.0,
     "operatingCashFlow": -22.0,
     "freeCashFlow": -14.0,
     "interestExpense": 2.0,
+    "interestPaid": 2.0,
 }
 
 
@@ -120,6 +132,37 @@ def test_returns_metrics():
     assert prof["gross_profitability_ttm"] == pytest.approx(240.0 / 400.0)
 
 
+def test_return_variants():
+    panel = compute_metrics(make_panel())
+    prof = last_row(panel, "PROF")
+
+    expected_nopat = 80.0 * (1.0 - 16.0 / 72.0)
+
+    # capital employed = 400 assets - 60 current liabilities
+    assert prof["roce_ttm"] == pytest.approx(80.0 / 340.0)
+    assert prof["croic_ttm"] == pytest.approx(56.0 / 258.0)
+
+    # ex-goodwill capital = 258 - 80
+    assert prof["roic_ex_goodwill_ttm"] == pytest.approx(expected_nopat / 178.0)
+
+    # cash tax rate 12/72; flat company has zero trend
+    assert prof["nopat_cash_ttm"] == pytest.approx(80.0 * (1.0 - 12.0 / 72.0))
+    assert prof["roic_cash_tax_ttm"] == pytest.approx(80.0 * (1.0 - 12.0 / 72.0) / 258.0)
+    assert prof["roic_trend_3y"] == pytest.approx(0.0)
+
+
+def test_rnd_adjusted_roic():
+    """Flat 4/quarter R&D: asset = 4 * sum(1..20)/20 = 42, amortization cancels the
+    add-back, so only the capital base changes: 258 + 42 = 300."""
+    panel = compute_metrics(make_panel())
+    prof = last_row(panel, "PROF")
+
+    expected_nopat = 80.0 * (1.0 - 16.0 / 72.0)
+
+    assert prof["invested_capital_rnd_adj"] == pytest.approx(300.0)
+    assert prof["rnd_adj_roic_ttm"] == pytest.approx(expected_nopat / 300.0)
+
+
 def test_loss_maker_stays_defined():
     """Pre-tax losses fall back to a 0 tax rate so ROIC stays defined for short targets."""
     panel = compute_metrics(make_panel())
@@ -144,13 +187,43 @@ def test_cash_quality_metrics():
     assert prof["sbc_to_revenue_ttm"] == pytest.approx(8.0 / 400.0)
 
 
+def test_cash_generation_metrics():
+    panel = compute_metrics(make_panel())
+    prof = last_row(panel, "PROF")
+
+    assert prof["fcf_adj_ttm"] == pytest.approx(48.0)  # 56 FCF - 8 SBC
+    assert prof["fcf_adj_margin_ttm"] == pytest.approx(48.0 / 400.0)
+    assert prof["owner_earnings_ttm"] == pytest.approx(68.0)  # 88 OCF - min(32 capex, 20 D&A)
+    assert prof["rnd_to_revenue_ttm"] == pytest.approx(16.0 / 400.0)
+
+
+def test_working_capital_metrics():
+    panel = compute_metrics(make_panel())
+    prof = last_row(panel, "PROF")
+
+    # COGS 160: DSO 36.5, DIO 68.4375, DPO 57.03125
+    assert prof["dpo_ttm"] == pytest.approx(25.0 * 365.0 / 160.0)
+    assert prof["ccc_ttm"] == pytest.approx(36.5 + 30.0 * 365.0 / 160.0 - 25.0 * 365.0 / 160.0)
+    assert prof["ccc_change_3y"] == pytest.approx(0.0)
+
+
 def test_balance_and_coverage():
     panel = compute_metrics(make_panel())
     prof = last_row(panel, "PROF")
+    loss = last_row(panel, "LOSS")
 
     assert prof["ebitda_ttm"] == pytest.approx(100.0)  # 80 EBIT + 20 D&A
     assert prof["net_debt_to_ebitda"] == pytest.approx(0.5)
     assert prof["interest_coverage"] == np.inf  # no interest expense, positive EBIT
+
+    assert prof["fcf_conversion_ttm"] == pytest.approx(0.56)
+    assert prof["net_debt_to_fcf"] == pytest.approx(50.0 / 56.0)
+    assert prof["st_debt_share"] == pytest.approx(0.2)
+    assert prof["goodwill_to_assets"] == pytest.approx(0.2)
+
+    # PROF pays no interest in cash; LOSS covers 8 paid from -80 pre-interest pre-tax cash.
+    assert prof["cash_interest_coverage"] == np.inf
+    assert loss["cash_interest_coverage"] == pytest.approx((-88.0 + 8.0 + 0.0) / 8.0)
 
 
 def test_growth_flat_company():
@@ -159,8 +232,11 @@ def test_growth_flat_company():
 
     assert prof["revenue_cagr_5y"] == pytest.approx(0.0)
     assert prof["fcf_per_share_ttm"] == pytest.approx(56.0 / 10.0)
+    assert prof["fcf_adj_per_share_ttm"] == pytest.approx(48.0 / 10.0)
+    assert prof["fcf_adj_ps_cagr_5y"] == pytest.approx(0.0)
     assert prof["revenue_growth_years_5y"] == pytest.approx(0.0)  # flat = zero up-years
     assert prof["share_change_3y"] == pytest.approx(0.0)
+    assert prof["deferred_revenue_growth_yoy"] == pytest.approx(0.0)
 
 
 def test_reinvestment_and_payout():
@@ -170,6 +246,8 @@ def test_reinvestment_and_payout():
     assert np.isnan(prof["incremental_roic_5y"])  # capital base never grew
     assert prof["reinvestment_rate_ttm"] == pytest.approx(32.0 / 88.0)
     assert prof["gross_margin_std_5y"] == pytest.approx(0.0)
+    assert prof["operating_margin_ttm"] == pytest.approx(72.0 / 400.0)
+    assert prof["operating_margin_change_3y"] == pytest.approx(0.0)
     # 20 quarters of (6 dividends + 2 buybacks) over 20 quarters of 14 FCF
     assert prof["payout_to_fcf_5y"] == pytest.approx(160.0 / 280.0)
 
@@ -183,10 +261,14 @@ def test_distress_metrics():
     assert prof["current_ratio"] == pytest.approx(2.0)
     assert prof["fcf_to_assets_ttm"] == pytest.approx(56.0 / 400.0)
     assert prof["debt_buildup_3y"] == pytest.approx(0.0)
+    assert prof["net_debt_change_3y"] == pytest.approx(0.0)
     assert prof["dio_ttm"] == pytest.approx(30.0 * 365.0 / 160.0)
 
     assert np.isnan(prof["cash_runway_quarters"])  # positive FCF -> no burn
     assert loss["cash_runway_quarters"] == pytest.approx(50.0 / 14.0)  # 56 TTM burn / 4
+
+    # Z = 1.2(60/400) + 1.4(150/400) + 3.3(80/400) + 0.6(1000/200) + 400/400
+    assert prof["altman_z"] == pytest.approx(5.365)
 
 
 def test_valuation_metrics():
@@ -194,4 +276,5 @@ def test_valuation_metrics():
     prof = last_row(panel, "PROF")
 
     assert prof["fcf_yield_ttm"] == pytest.approx(56.0 / 1000.0)
+    assert prof["fcf_adj_yield_ttm"] == pytest.approx(48.0 / 1000.0)
     assert prof["ev_to_ebitda_ttm"] == pytest.approx(10.5)

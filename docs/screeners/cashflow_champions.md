@@ -5,8 +5,8 @@ real cash, show accounting green flags, carry little debt, and have proven they 
 excess cash at attractive incremental returns — the drivers of long-run compounding. Every
 test is measured over multi-year windows; nothing in this screen is a single-quarter snapshot.
 
-**Code:** `src/systematic_trading/screeners/csf_champions/`
-**Build:** `uv run python -m systematic_trading.screeners.panels.fundamentals.build` (rerun
+**Code:** `src/systematic_trading/screener/fundamentals/screeners/champions.py`
+**Build:** `uv run python -m systematic_trading.screener.fundamentals.build` (rerun
 after each `push_fundamentals.py` refresh)
 **Input:** `s3://<S3_BUCKET>/screeners/fundamentals_panel.parquet` (the shared metrics panel)
 **Layering:** see `docs/screeners/architecture.md` for the panels/screeners/shared split.
@@ -46,7 +46,7 @@ window is implausible (reporting gap guard: `lags × 98 + 40` days).
 
 | Metric | Formula | Default |
 |---|---|---|
-| `roic_ttm` | NOPAT ÷ avg invested capital; NOPAT = EBIT_ttm × (1 − effective tax rate, capped at 50%, 0 for pre-tax loss-makers so ROIC stays defined and keeps EBIT's sign); invested capital = total debt + total equity − cash & short-term investments (financing approach, excess cash netted out) | ≥ 15% |
+| `roic_ttm` | NOPAT ÷ avg invested capital; NOPAT = EBIT_ttm × (1 − effective tax rate, capped at 50%, 0 for pre-tax loss-makers so ROIC stays defined and keeps EBIT's sign); invested capital = total debt + total equity − excess cash (cash & short-term investments above a 2%-of-TTM-revenue operating allowance, so cash-rich compounders keep a defined ROIC) | ≥ 15% |
 | `roic_floor_5y` | minimum TTM ROIC over the trailing 20 quarters | ≥ 10% |
 
 The 15% bar is the practitioner consensus (Fundsmith-style ROCE > 15%, Compounding Quality
@@ -61,6 +61,7 @@ Capital*, Morgan Stanley).
 | Metric | Formula | Default |
 |---|---|---|
 | `fcf_margin_ttm` | FCF_ttm ÷ revenue_ttm | ≥ 5% |
+| `fcf_adj_margin_ttm` | (FCF_ttm − stock-based comp_ttm) ÷ revenue_ttm — same bar after netting out the SBC add-back, closing the loophole where dilution-funded "cash flow" passes the margin gate | ≥ 5% |
 | `income_quality_ttm` | operating cash flow_ttm ÷ net income_ttm | ≥ 1.0 |
 | `fcf_positive_quarters_5y` | count of positive-FCF quarters in the trailing 20 | ≥ 18 |
 
@@ -123,22 +124,29 @@ closes the SBC loophole (SBC is added back to CFO but shows up in the share coun
 These rank companies but don't gate them: shrinking-capital compounders (heavy buybacks) have
 no meaningful incremental ROIC and shouldn't fail for it.
 
-### 7. Valuation context (never filtered, never scored)
+### 7. Valuation (scored, never filtered)
 
 | Metric | Formula |
 |---|---|
-| `fcf_yield_ttm` | FCF_ttm ÷ market cap at fiscal quarter end |
-| `ev_to_ebitda_ttm` | enterprise value ÷ EBITDA_ttm |
+| `fcf_yield_ttm` | FCF_ttm ÷ market cap at fiscal quarter end — **scored** as the value leg of the composite |
+| `fcf_adj_yield_ttm` | SBC-adjusted FCF_ttm ÷ market cap (context) |
+| `ev_to_ebitda_ttm` | enterprise value ÷ EBITDA_ttm (context) |
 
 Market cap and enterprise value join from the key-metrics file (left join — quarters it
-doesn't cover carry NaN valuations). This is deliberately a quality screen, not a value
-screen; these columns exist so the champion list can be sorted by cheapness afterwards.
+doesn't cover carry NaN valuations). FCF yield entered the composite score in July 2026 per
+Novy-Marx's integrated-rank evidence: a single joint quality+value rank earned 7.4%/yr vs
+~3.5% for the same signals run as separate sleeves (see
+`docs/screeners/quality_metrics_research.md`). No valuation hard gate — cheapness ranks, it
+doesn't veto.
 
 ## Composite score
 
 Rank-percentile average (0–100) over: ROIC, incremental ROIC, gross profitability, payout
-discipline, FCF margin, income quality, revenue CAGR, FCF/share CAGR (higher better) and
-accruals, net debt/EBITDA, gross-margin volatility, SBC/revenue (lower better). Rank-based scoring follows O'Shaughnessy (composites
+discipline, FCF margin, income quality, revenue CAGR, FCF/share CAGR, FCF yield (higher
+better) and accruals, gross-margin volatility, SBC/revenue (lower better). Leverage is
+deliberately **gated, not scored**: NBIM's global factor tests found safety/leverage the only
+quality dimension without significant alpha, so net debt/EBITDA buys durability at the gate
+while the score ranks quality and value. Rank-based scoring follows O'Shaughnessy (composites
 beat single metrics ~82% of the time) and AQR's Quality-Minus-Junk construction, and is
 naturally robust to the fat tails hard z-scores choke on. The architecture — few hard gates
 for non-negotiables, everything else ranked — is the same hybrid S&P uses for the FCF

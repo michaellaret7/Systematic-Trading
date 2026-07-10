@@ -3,6 +3,7 @@
 import pandas as pd
 
 from systematic_trading.screener.fundamentals.metrics.helpers import (
+    LAGS_3Y,
     LAGS_5Y,
     rolling,
     safe_ratio,
@@ -32,6 +33,11 @@ def add_reinvestment(panel: pd.DataFrame) -> pd.DataFrame:
     panel["gross_margin_ttm"] = safe_ratio(panel["grossProfit_ttm"], panel["revenue_ttm"])
     margin_std = rolling(panel, "gross_margin_ttm", LAGS_5Y, 16, "std")
     panel["gross_margin_std_5y"] = margin_std.where(span_ok(panel, LAGS_5Y - 1))
+
+    panel["operating_margin_ttm"] = safe_ratio(panel["operatingIncome_ttm"], panel["revenue_ttm"])
+    panel["operating_margin_change_3y"] = (
+        panel["operating_margin_ttm"] - shift(panel, "operating_margin_ttm", LAGS_3Y)
+    ).where(span_ok(panel, LAGS_3Y))
 
     return panel
 

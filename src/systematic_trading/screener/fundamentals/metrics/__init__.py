@@ -23,8 +23,13 @@ from systematic_trading.screener.fundamentals.metrics.growth import add_growth
 from systematic_trading.screener.fundamentals.metrics.quality import (
     add_balance,
     add_cash_quality,
+    add_working_capital,
 )
-from systematic_trading.screener.fundamentals.metrics.returns import add_returns
+from systematic_trading.screener.fundamentals.metrics.returns import (
+    add_returns,
+    add_return_variants,
+    add_rnd_adjusted_returns,
+)
 from systematic_trading.screener.fundamentals.metrics.valuation import add_valuation
 
 __all__ = ["METRIC_GROUPS", "compute_metrics"]
@@ -32,7 +37,10 @@ __all__ = ["METRIC_GROUPS", "compute_metrics"]
 METRIC_GROUPS = (
     add_ttm_flows,
     add_returns,
+    add_return_variants,
+    add_rnd_adjusted_returns,
     add_cash_quality,
+    add_working_capital,
     add_balance,
     add_growth,
     add_reinvestment,

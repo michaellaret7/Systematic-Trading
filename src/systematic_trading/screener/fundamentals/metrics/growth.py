@@ -23,6 +23,11 @@ def add_growth(panel: pd.DataFrame) -> pd.DataFrame:
     fcf_ps_then = shift(panel, "fcf_per_share_ttm", LAGS_5Y)
     panel["fcf_ps_cagr_5y"] = cagr(panel["fcf_per_share_ttm"], fcf_ps_then, 5).where(ok_5y)
 
+    # Same growth measured on SBC-adjusted cash: growth bought with dilution doesn't count.
+    panel["fcf_adj_per_share_ttm"] = safe_ratio(panel["fcf_adj_ttm"], panel["shares_ttm"])
+    adj_ps_then = shift(panel, "fcf_adj_per_share_ttm", LAGS_5Y)
+    panel["fcf_adj_ps_cagr_5y"] = cagr(panel["fcf_adj_per_share_ttm"], adj_ps_then, 5).where(ok_5y)
+
     year_ago = shift(panel, "revenue_ttm", 4)
     yoy_positive = (panel["revenue_ttm"] > year_ago).astype(float).where(year_ago.notna())
 
@@ -35,5 +40,11 @@ def add_growth(panel: pd.DataFrame) -> pd.DataFrame:
     panel["share_change_3y"] = (panel["shares_ttm"] / shares_then - 1.0).where(
         span_ok(panel, LAGS_3Y)
     )
+
+    # Deferred revenue growth: a forward demand signal for subscription models.
+    deferred_then = shift(panel, "deferredRevenue", 4)
+    panel["deferred_revenue_growth_yoy"] = (
+        safe_ratio(panel["deferredRevenue"], deferred_then) - 1.0
+    ).where(span_ok(panel, 4))
 
     return panel

@@ -30,6 +30,12 @@ def add_distress(panel: pd.DataFrame) -> pd.DataFrame:
     assets_then = shift(panel, "totalAssets", LAGS_3Y)
     panel["debt_buildup_3y"] = safe_ratio(debt_added, assets_then).where(span_ok(panel, LAGS_3Y))
 
+    # Net-debt version of the same flag: cash drawdowns count as deterioration too.
+    net_debt_added = panel["netDebt"] - shift(panel, "netDebt", LAGS_3Y)
+    panel["net_debt_change_3y"] = safe_ratio(net_debt_added, assets_then).where(
+        span_ok(panel, LAGS_3Y)
+    )
+
     panel["current_ratio"] = safe_ratio(
         panel["totalCurrentAssets"], panel["totalCurrentLiabilities"]
     )
@@ -40,10 +46,14 @@ def add_distress(panel: pd.DataFrame) -> pd.DataFrame:
         panel["cashAndShortTermInvestments"], burn_per_quarter
     )
 
-    cogs_ttm = panel["revenue_ttm"] - panel["grossProfit_ttm"]
-    panel["dio_ttm"] = safe_ratio(panel["inventory"] * 365.0, cogs_ttm)
-    panel["dio_change_3y"] = (panel["dio_ttm"] - shift(panel, "dio_ttm", LAGS_3Y)).where(
-        span_ok(panel, LAGS_3Y)
+    # Altman Z (1968 form) as a coarse distress gate; any missing input NaNs the score.
+    working_capital = panel["totalCurrentAssets"] - panel["totalCurrentLiabilities"]
+    panel["altman_z"] = (
+        1.2 * safe_ratio(working_capital, panel["totalAssets"])
+        + 1.4 * safe_ratio(panel["retainedEarnings"], panel["totalAssets"])
+        + 3.3 * safe_ratio(panel["ebit_ttm"], panel["totalAssets"])
+        + 0.6 * safe_ratio(panel["marketCap"], panel["totalLiabilities"])
+        + 1.0 * safe_ratio(panel["revenue_ttm"], panel["totalAssets"])
     )
 
     return panel

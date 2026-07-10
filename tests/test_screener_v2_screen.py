@@ -1,4 +1,4 @@
-﻿"""Screen machinery for screener.
+"""Screen machinery for screener.
 
 Small synthetic panel with known dates and metrics; checks the point-in-time
 cross-section, staleness drop, criteria gating (including NaN-fails), scoring
@@ -15,6 +15,7 @@ from systematic_trading.screener.fundamentals.screen import (
     drop_sectors,
     passes_gates,
     run_screen,
+    sector_relative,
 )
 
 #     ================================
@@ -100,6 +101,21 @@ def test_drop_sectors():
 
     strict = drop_sectors(snapshot, ("Utilities",), drop_missing_sector=True)
     assert strict["symbol"].tolist() == ["B"]
+
+
+def test_sector_relative():
+    snapshot = pd.DataFrame(
+        {
+            "sector": ["Tech", "Tech", "Energy", None],
+            "roic_ttm": [0.30, 0.10, 0.05, 0.50],
+        }
+    )
+
+    spread = sector_relative(snapshot, "roic_ttm")
+
+    # Tech median 0.20, Energy is its own median; no sector -> no benchmark.
+    assert spread.iloc[:3].tolist() == pytest.approx([0.10, -0.10, 0.0])
+    assert np.isnan(spread.iloc[3])
 
 
 def test_run_screen_end_to_end():

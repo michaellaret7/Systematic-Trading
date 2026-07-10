@@ -33,10 +33,12 @@ RAW_COLUMNS: dict[str, list[str]] = {
         "revenue",
         "grossProfit",
         "ebit",
+        "operatingIncome",
         "interestExpense",
         "incomeBeforeTax",
         "incomeTaxExpense",
         "netIncome",
+        "researchAndDevelopmentExpenses",
         "weightedAverageShsOutDil",
     ],
     "balance": [
@@ -49,8 +51,14 @@ RAW_COLUMNS: dict[str, list[str]] = {
         "totalDebt",
         "netDebt",
         "totalEquity",
+        "totalLiabilities",
         "netReceivables",
         "inventory",
+        "goodwill",
+        "accountPayables",
+        "retainedEarnings",
+        "shortTermDebt",
+        "deferredRevenue",
     ],
     "cashflow": [
         "symbol",
@@ -63,6 +71,8 @@ RAW_COLUMNS: dict[str, list[str]] = {
         "depreciationAndAmortization",
         "netDividendsPaid",
         "netStockIssuance",
+        "incomeTaxesPaid",
+        "interestPaid",
     ],
     "key_metrics": [
         "symbol",
@@ -74,7 +84,7 @@ RAW_COLUMNS: dict[str, list[str]] = {
 
 
 def load_merged_quarters() -> pd.DataFrame:
-    """Load the quarterly statements and merge them into one row per (symbol, date)."""
+    """Merge each ticker's quarterly statements into one wide row per (symbol, date)."""
     merged: pd.DataFrame | None = None
 
     for statement, columns in RAW_COLUMNS.items():
@@ -101,7 +111,7 @@ def load_sectors() -> pd.DataFrame:
     return universe[["symbol", "sector", "industry"]].drop_duplicates("symbol")
 
 
-def main() -> None:
+def build_panel() -> None:
     """Build the panel end to end and write it to S3."""
     merged = load_merged_quarters()
 
@@ -109,13 +119,11 @@ def main() -> None:
     panel = panel.merge(load_sectors(), on="symbol", how="left")
 
     write_panel(panel)
-    print(panel.head(10))
 
     print(
-        f"[panel] {len(panel):,} rows, {panel['symbol'].nunique():,} symbols, "
-        f"{len(panel.columns)} columns -> {panel_uri()}"
+        f"[panel] {len(panel):,} rows, {panel['symbol'].nunique():,} symbols, {len(panel.columns)} columns -> {panel_uri()}"
     )
 
 
 if __name__ == "__main__":
-    main()
+    build_panel()

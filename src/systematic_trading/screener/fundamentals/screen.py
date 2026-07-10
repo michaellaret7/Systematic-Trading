@@ -1,4 +1,4 @@
-﻿"""Panel-agnostic screen machinery: point-in-time snapshots, gating, and scoring.
+"""Panel-agnostic screen machinery: point-in-time snapshots, gating, and scoring.
 
 Each screener module owns its opinions (which metrics to gate, thresholds,
 score weights, sector exclusions); this module owns the mechanics that are
@@ -23,6 +23,7 @@ def run_screen(
     as_of: pd.Timestamp | str | None = None,
     excluded_sectors: tuple[str, ...] = (),
     drop_missing_sector: bool = False,
+    sector_relative_columns: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """The standard screen pipeline over any metrics panel.
 
@@ -42,10 +43,14 @@ def run_screen(
     if excluded_sectors or drop_missing_sector:
         snapshot = drop_sectors(snapshot, excluded_sectors, drop_missing_sector)
 
+    # Sector-relative views (metric minus its sector median), available to gates and scores.
+    for column in sector_relative_columns:
+        snapshot[f"{column}_vs_sector"] = sector_relative(snapshot, column)
+
     # Score every company against the full cross-section (before gating, so ranks mean
     # "percentile of the market" and stay comparable across screens and dates).
     snapshot["score"] = composite_score(snapshot, score_weights)
-    
+
     # Keep only companies clearing every _min/_max threshold gate.
     matches = snapshot[passes_gates(snapshot, criteria)]
 
@@ -80,6 +85,18 @@ def drop_sectors(
         keep &= snapshot["sector"].notna()
 
     return snapshot[keep].copy()
+
+
+def sector_relative(snapshot: pd.DataFrame, column: str) -> pd.Series:
+    """Metric minus its sector median within this cross-section.
+
+    Value creation is relative — ROIC mean-reverts toward the sector median, so
+    the spread over that median is the durable part of the signal. Rows with no
+    sector get NaN.
+    """
+    sector_median = snapshot.groupby("sector")[column].transform("median")
+
+    return snapshot[column] - sector_median
 
 
 def composite_score(snapshot: pd.DataFrame, score_weights: dict[str, int]) -> pd.Series:
