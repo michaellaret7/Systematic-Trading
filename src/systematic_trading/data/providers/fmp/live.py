@@ -218,6 +218,24 @@ class FMPClient:
 
         return _price_frame(rows)
 
+    def splits_calendar(
+        self,
+        start: dt.date | dt.datetime | str,
+        end: dt.date | dt.datetime | str,
+    ) -> pd.DataFrame:
+        """Stock splits dated within ``[start, end]``, one row per (symbol, date).
+
+        Adjusted price series change retroactively when a split lands, so
+        consumers holding stored prices should re-pull any symbol that appears
+        here since their last refresh.
+        """
+        rows = self._get(
+            "splits-calendar",
+            {"from": _to_date(start).isoformat(), "to": _to_date(end).isoformat()},
+        )
+
+        return _statement_frame(rows)
+
     def screener(
         self,
         market_cap_more_than: float | None = None,

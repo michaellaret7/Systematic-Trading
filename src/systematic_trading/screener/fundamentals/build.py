@@ -15,11 +15,7 @@ data refreshes:
 import pandas as pd
 
 from systematic_trading.data.providers.fmp import FMPClient
-from systematic_trading.screener.fundamentals.data import (
-    load_statement,
-    panel_uri,
-    write_panel,
-)
+from systematic_trading.data.repository import load_statement, panel_uri, write_panel
 from systematic_trading.screener.fundamentals.metrics import compute_metrics
 
 # Columns pulled per statement, keeping FMP's names. Only what the metrics consume.

@@ -1,7 +1,7 @@
-"""S3 I/O for screener: raw FMP statement parquets in, the built panel out.
+"""S3 I/O for the fundamentals repository: raw FMP statements and the built panel.
 
-This module is the only place that knows where the parquet files live. Raw
-statements sit under ``fundamentals/`` (5 statements x quarter/annual); the
+This module is the only place that knows where the fundamentals parquets live.
+Raw statements sit under ``fundamentals/`` (5 statements x quarter/annual); the
 built panel is one shared parquet every fundamental screener reads from.
 """
 
@@ -39,6 +39,11 @@ def load_statement(
     return pd.read_parquet(statement_uri(statement, period), columns=columns)
 
 
+def write_statement(frame: pd.DataFrame, statement: str, period: str) -> None:
+    """Overwrite one raw FMP statement parquet on S3."""
+    frame.to_parquet(statement_uri(statement, period), index=False)
+
+
 def load_panel(columns: list[str] | None = None) -> pd.DataFrame:
     """Load the fundamentals panel; screeners pass just the columns they need."""
     return pd.read_parquet(panel_uri(), columns=columns)
@@ -47,3 +52,10 @@ def load_panel(columns: list[str] | None = None) -> pd.DataFrame:
 def write_panel(panel: pd.DataFrame) -> None:
     """Overwrite the shared fundamentals panel on S3."""
     panel.to_parquet(panel_uri(), index=False)
+
+
+def panel_symbols() -> list[str]:
+    """Every symbol in the fundamentals panel, alphabetical."""
+    panel = load_panel(columns=["symbol"])
+
+    return sorted(panel["symbol"].unique())

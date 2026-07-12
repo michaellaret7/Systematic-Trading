@@ -20,9 +20,13 @@ import time
 import pandas as pd
 import requests
 
-from systematic_trading.config import s3_bucket
 from systematic_trading.data.providers.fmp import FMPClient
-from systematic_trading.screener.fundamentals.data import load_panel
+from systematic_trading.data.repository import (
+    daily_prices_uri,
+    load_daily_prices,
+    panel_symbols,
+    write_daily_prices,
+)
 
 YEARS_OF_HISTORY = 4
 
@@ -36,18 +40,6 @@ TRANSIENT_ERRORS = (RuntimeError, requests.RequestException)
 #     ================================
 # --> Helper funcs
 #     ================================
-
-
-def prices_uri() -> str:
-    """S3 URI of the daily OHLCV parquet."""
-    return f"s3://{s3_bucket()}/prices/daily_ohclv.parquet"
-
-
-def panel_symbols() -> list[str]:
-    """Every symbol in the fundamentals panel, alphabetical."""
-    panel = load_panel(columns=["symbol"])
-
-    return sorted(panel["symbol"].unique())
 
 
 def fetch_with_backoff(
@@ -77,6 +69,30 @@ def to_panel_rows(symbol: str, bars: pd.DataFrame) -> pd.DataFrame:
     rows.insert(0, "symbol", symbol)
 
     return rows
+
+
+def fetch_symbols(
+    client: FMPClient, symbols: list[str], start: dt.date, end: dt.date, label: str
+) -> tuple[list[pd.DataFrame], list[str]]:
+    """Daily bars for each symbol as flat panel rows; returns (frames, failed symbols)."""
+    frames: list[pd.DataFrame] = []
+    failures: list[str] = []
+
+    for i, symbol in enumerate(symbols, start=1):
+        try:
+            bars = fetch_with_backoff(client, symbol, start, end)
+        except TRANSIENT_ERRORS as error:
+            failures.append(symbol)
+            print(f"  {symbol}: giving up ({error})")
+            continue
+
+        if not bars.empty:
+            frames.append(to_panel_rows(symbol, bars))
+
+        if i % 250 == 0:
+            print(f"  [{label}] {i}/{len(symbols)} symbols fetched...")
+
+    return frames, failures
 
 
 #     ================================
@@ -114,16 +130,16 @@ def main() -> None:
     combined = pd.concat(frames, ignore_index=True)
     combined = combined.sort_values(["symbol", "date"], ignore_index=True)
 
-    uri = prices_uri()
+    uri = daily_prices_uri()
 
     print(
         f"Writing {len(combined):,} rows x {combined.shape[1]} columns "
         f"for {combined['symbol'].nunique():,} symbols to {uri} ..."
     )
-    combined.to_parquet(uri, index=False)
+    write_daily_prices(combined)
 
     # Read back from S3 so the round trip is verified, not assumed.
-    check = pd.read_parquet(uri, columns=["symbol", "date"])
+    check = load_daily_prices(columns=["symbol", "date"])
 
     print(
         f"Read-back: {len(check):,} rows, {check['symbol'].nunique():,} symbols, "

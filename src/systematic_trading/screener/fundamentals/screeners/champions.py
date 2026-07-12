@@ -7,7 +7,7 @@ Methodology doc: docs/screeners/cashflow_champions.md.
 
 import pandas as pd
 
-from systematic_trading.screener.fundamentals import load_panel
+from systematic_trading.data.repository import load_panel
 from systematic_trading.screener.fundamentals.screen import run_screen
 
 DEFAULT_CRITERIA: dict[str, float] = {

@@ -12,7 +12,20 @@ Source: lumibot.lumiwealth.com docs + Lumiwealth/lumibot repo (v4.x, 2026).
 - **Strategy methods**: the API you CALL inside your overrides (`self.get_last_price`, `self.submit_order`, ...). Never override these.
 - The main loop is **clock driven, not data event driven**: `on_trading_iteration` fires every `self.sleeptime` while the market is open. You pull data inside it; nothing is pushed.
 
-## 2. Lifecycle Methods (all 16, execution order)
+## 2. Documentation Resources
+
+**Lumibot docs: https://lumibot.lumiwealth.com/** — go here for anything framework-related. Check the docs before guessing at Lumibot API behavior; the framework has many non-obvious conventions.
+
+Key pages (consult these directly — they cover most day-to-day work):
+
+- **Strategy methods** — https://lumibot.lumiwealth.com/strategy_methods.html — everything callable on `self` inside a strategy: orders (`create_order`, `submit_order`), data (`get_last_price`, `get_historical_prices`), positions, account state.
+- **Lifecycle methods** — https://lumibot.lumiwealth.com/lifecycle_methods.html — the hooks Lumibot calls (`initialize`, `on_trading_iteration`, `before_market_closes`, `on_filled_order`, `on_abrupt_closing`, …) and when each fires these are customizeable per stratgy.
+- **Strategy properties** — https://lumibot.lumiwealth.com/strategy_properties.html — attributes like `self.cash`, `self.portfolio_value`, `self.sleeptime`, `self.is_backtesting`, `self.minutes_before_closing`.
+- **Entities** — https://lumibot.lumiwealth.com/entities.html — the `Asset`, `Order`, `Position`, `Bars` objects that methods take and return.
+- **Alpaca broker** — https://lumibot.lumiwealth.com/brokers.alpaca.html — our broker: config dict shape, supported order types/sides, quirks.
+- **Examples** — https://lumibot.lumiwealth.com/examples.html — complete reference strategies showing idiomatic Lumibot patterns.
+
+## 3. Lifecycle Methods (all 16, execution order)
 
 | Method | When it fires | Typical use |
 |---|---|---|
@@ -33,7 +46,7 @@ Source: lumibot.lumiwealth.com docs + Lumiwealth/lumibot repo (v4.x, 2026).
 | `on_parameters_updated(self, parameters)` | After `self.update_parameters()` | Recompute derived state live |
 | `tearsheet_custom_metrics(self, stats_df, strategy_returns, benchmark_returns, drawdown, drawdown_details, risk_free_rate)` | Backtest only, before tearsheet written | Return `{name: scalar}` extra metrics; `{}` if none |
 
-## 3. Full Strategy API: Callable Methods (what you call, never override)
+## 4. Full Strategy API: Callable Methods (what you call, never override)
 
 Complete list of documented `Strategy` methods, grouped as in the official docs.
 
@@ -63,7 +76,7 @@ Notes:
 - `wait_for_order_execution(order)` blocks until fill and is the synchronous alternative to the `on_filled_order` callback; use sparingly in live trading.
 - `await_market_to_open(timedelta_min)` is useful inside custom flows to park until N minutes before the open.
 
-## 3b. Usage Snippets (most used calls)
+## 4b. Usage Snippets (most used calls)
 
 **Orders**
 ```python
@@ -120,7 +133,7 @@ self.add_marker("Buy", price, color="green", asset=a, detail_text="why")
 # Always pass asset= to overlay on the price chart.
 ```
 
-## 4. Entities
+## 5. Entities
 
 ```python
 from lumibot.entities import Asset, Order
@@ -136,7 +149,7 @@ Asset("ES", asset_type=Asset.AssetType.FUTURE, expiration=...)
 - `Order`: `.symbol`, `.quantity`, `.side`, `.status`, `.limit_price`
 - `Bars`: `.df` pandas DataFrame (open/high/low/close/volume)
 
-## 5. Boilerplate
+## 6. Boilerplate
 
 **Backtest**
 ```python
@@ -181,7 +194,7 @@ trader.run_all()
 ```
 Credentials can also come from env vars / `.env` (e.g. `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `ALPACA_IS_PAPER`, `POLYGON_API_KEY`, `THETADATA_USERNAME/PASSWORD`).
 
-## 6. CRITICAL RULES (from official common_mistakes docs)
+## 7. CRITICAL RULES (from official common_mistakes docs)
 
 1. **NEVER `datetime.now()` / `datetime.today()`.** Always `self.get_datetime()`. Otherwise backtests use wall clock time and results are garbage.
 2. **NEVER `from __future__ import annotations`.** Crashes backtesting. Remove it.
@@ -202,7 +215,7 @@ Credentials can also come from env vars / `.env` (e.g. `ALPACA_API_KEY`, `ALPACA
 17. **Never fabricate market data.** If bars are missing, skip/log; do not forward fill, interpolate, or invent placeholder bars.
 18. **Chart hygiene:** `add_marker` only on events, `add_line` for continuous series, always pass `asset=`, use `detail_text=` (there is no `text=` param).
 
-## 7. Custom Data Provider (Pandas Backtesting)
+## 8. Custom Data Provider (Pandas Backtesting)
 
 Use `PandasDataBacktesting` to backtest on your own data (CSV, parquet, database, any source). This is the custom data path; Polygon/Yahoo/ThetaData are easier if their data suffices.
 
@@ -240,7 +253,7 @@ Rules:
 - Works for stocks, futures, crypto, and forex. Options expiration in Pandas backtests follows broker style settlement (physical for equity options, cash for index options; statuses `assigned` / `exercised` / `cash_settled` / `expired` land in trade artifacts).
 - Missing data must stay missing. Never forward fill or synthesize bars to keep a backtest alive.
 
-## 8. Fees, Slippage, Smart Limit Orders
+## 9. Fees, Slippage, Smart Limit Orders
 
 **Trading fees** (backtest realism):
 ```python
@@ -264,7 +277,7 @@ order = self.create_order("SPY", 100, "buy", smart_limit=cfg)
 ```
 Multi leg: parent order with `order_class=Order.OrderClass.MULTILEG` and legs on `child_orders`; fills atomically at net mid + slippage.
 
-## 9. Futures Asset Types
+## 10. Futures Asset Types
 
 ```python
 Asset("ES", asset_type=Asset.AssetType.CONT_FUTURE)          # continuous: PREFERRED for backtests, no roll management
@@ -273,12 +286,12 @@ Asset("MES", asset_type=Asset.AssetType.FUTURE, auto_expiry=Asset.AutoExpiry.FRO
 ```
 Common symbols: ES/MES, NQ/MNQ, CL, GC. Use `set_market("us_futures")`. Remember `close_position()` for crypto futures.
 
-## 10. State Persistence
+## 11. State Persistence
 
 - `self.vars` survives across iterations in one run. Locals inside `on_trading_iteration` do not.
 - Set env var `DB_CONNECTION_STR` (any SQLAlchemy string) and Lumibot auto backs up `self.vars` after every iteration and restores it on startup, so state survives bot restarts.
 
-## 11. Built-In Point-in-Time Data Tools
+## 12. Built-In Point-in-Time Data Tools
 
 **SEC fundamentals** (no API key, cached, backtest safe: gated to filings known as of `self.get_datetime()`):
 ```python
@@ -297,7 +310,7 @@ self.macro.get_latest("UNRATE")
 self.macro.get_snapshot(["FEDFUNDS", "DGS10", "CPIAUCSL", "UNRATE"])
 ```
 
-## 12. Key Environment Variables
+## 13. Key Environment Variables
 
 - `IS_BACKTESTING`, `BACKTESTING_START`, `BACKTESTING_END`, `BACKTESTING_DATA_SOURCE` (pass `None` as datasource to auto select)
 - Broker creds: `ALPACA_API_KEY` / `ALPACA_API_SECRET` / `ALPACA_IS_PAPER`, IBKR/Tradier/Schwab equivalents
@@ -306,7 +319,7 @@ self.macro.get_snapshot(["FEDFUNDS", "DGS10", "CPIAUCSL", "UNRATE"])
 - Caches: `LUMIBOT_FRED_CACHE_DIR`, `LUMIBOT_SEC_CACHE_DIR` (defaults under `~/.lumibot/cache/`)
 - Notifications: Discord/Telegram webhook vars documented in `environment_variables.rst`
 
-## 13. Quick Facts
+## 14. Quick Facts
 
 - `sleeptime` formats: `"30S"`, `"5M"`, `"1H"`, `"1D"`.
 - Default market calendar is NASDAQ; `set_market()` supports `"24/7"`, `"us_futures"`, and many exchange calendars.

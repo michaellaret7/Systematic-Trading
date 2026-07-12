@@ -22,8 +22,8 @@ import time
 import pandas as pd
 import requests
 
-from systematic_trading.config import s3_bucket
 from systematic_trading.data.providers.fmp import FMPClient
+from systematic_trading.data.repository import load_statement, statement_uri, write_statement
 
 MARKET_CAP_FLOOR = 2_000_000_000
 PRICE_FLOOR = 5
@@ -86,7 +86,7 @@ def push_statement(client: FMPClient, statement: str, period: str, symbols: list
     """Fetch every symbol for one statement/period and write the file to S3."""
     method = STATEMENTS[statement]
     tag = f"{statement}_{period}"
-    uri = f"s3://{s3_bucket()}/fundamentals/{tag}.parquet"
+    uri = statement_uri(statement, period)
 
     frames: list[pd.DataFrame] = []
     failures: list[str] = []
@@ -112,10 +112,10 @@ def push_statement(client: FMPClient, statement: str, period: str, symbols: list
         f"[{tag}] writing {len(combined)} rows x {combined.shape[1]} columns "
         f"for {combined['symbol'].nunique()} symbols to {uri} ..."
     )
-    combined.to_parquet(uri, index=False)
+    write_statement(combined, statement, period)
 
     # Read back from S3 so the round trip is verified, not assumed.
-    check = pd.read_parquet(uri, columns=["symbol", "date"])
+    check = load_statement(statement, period, columns=["symbol", "date"])
 
     print(
         f"[{tag}] read-back: {len(check)} rows, {check['symbol'].nunique()} symbols, "
