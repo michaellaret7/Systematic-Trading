@@ -6,6 +6,8 @@ built panel is one shared parquet every fundamental screener reads from.
 """
 
 import pandas as pd
+import pyarrow.parquet as pq
+import s3fs
 
 from systematic_trading.config import s3_bucket
 
@@ -37,6 +39,14 @@ def load_statement(
 ) -> pd.DataFrame:
     """Load one raw statement, pulling only ``columns`` if given (parquet projection)."""
     return pd.read_parquet(statement_uri(statement, period), columns=columns)
+
+
+def statement_columns(statement: str, period: str = "quarter") -> list[str]:
+    """Column names of one raw statement parquet — schema-only read, no data download."""
+    fs = s3fs.S3FileSystem()
+
+    with fs.open(statement_uri(statement, period), "rb") as file:
+        return pq.read_schema(file).names
 
 
 def write_statement(frame: pd.DataFrame, statement: str, period: str) -> None:
