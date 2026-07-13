@@ -32,8 +32,23 @@ def _parse_date(value: str) -> pd.Timestamp | None:
     return parsed if isinstance(parsed, pd.Timestamp) else None
 
 
-def _missing_columns(requested: list[str], available: pd.Index) -> list[str]:
-    """Requested column names that don't exist in the loaded statement file."""
+# File schemas are static within a process; caching skips the footer round trip
+# on every call after the first for a given (statement, period).
+_SCHEMA_CACHE: dict[tuple[str, str], list[str]] = {}
+
+
+def _valid_columns(statement: str, period: str) -> list[str]:
+    """Column names of one statement file, cached per process."""
+    key = (statement, period)
+
+    if key not in _SCHEMA_CACHE:
+        _SCHEMA_CACHE[key] = statement_columns(statement, period)
+
+    return _SCHEMA_CACHE[key]
+
+
+def _missing_columns(requested: list[str], available: list[str]) -> list[str]:
+    """Requested column names that don't exist in the statement file."""
     return [column for column in requested if column not in available]
 
 
@@ -91,14 +106,91 @@ def get_fundamental_statement(
     statement, period) followed by a `rows` list, one mapping per fiscal
     period, oldest first. Missing values are null.
 
-    Prefer passing `columns` to fetch only the fields you need. If you do not
-    know the exact column names a statement contains, call GetStatementColumns
-    first — never guess column names. Omitting `columns` returns every column
-    in the file (39-64 depending on the statement), which is rarely worth the
-    context. The `date` column (fiscal period end) is always included so rows
-    stay anchored to their period.
-    Bad inputs return an "error: ..." string; an unknown column name returns
-    an error listing every valid column so you can correct it and retry.
+    Prefer passing `columns` to fetch only the fields you need — omitting it
+    returns every column in the file, which is rarely worth the context. Use
+    the exact names from the listing below; never guess or invent names. The
+    `date` column (fiscal period end) is always included so rows stay anchored
+    to their period. Bad inputs return an "error: ..." string; an unknown
+    column name returns an error listing every valid column so you can correct
+    it and retry.
+
+    Available columns per statement:
+
+    income:
+      date, symbol, reportedCurrency, cik, filingDate, acceptedDate, fiscalYear, period,
+      revenue, costOfRevenue, grossProfit, researchAndDevelopmentExpenses,
+      generalAndAdministrativeExpenses, sellingAndMarketingExpenses,
+      sellingGeneralAndAdministrativeExpenses, otherExpenses, operatingExpenses,
+      costAndExpenses, netInterestIncome, interestIncome, interestExpense,
+      depreciationAndAmortization, ebitda, ebit, nonOperatingIncomeExcludingInterest,
+      operatingIncome, totalOtherIncomeExpensesNet, incomeBeforeTax, incomeTaxExpense,
+      netIncomeFromContinuingOperations, netIncomeFromDiscontinuedOperations,
+      otherAdjustmentsToNetIncome, netIncome, netIncomeDeductions, bottomLineNetIncome, eps,
+      epsDiluted, weightedAverageShsOut, weightedAverageShsOutDil
+
+    balance:
+      date, symbol, reportedCurrency, cik, filingDate, acceptedDate, fiscalYear, period,
+      cashAndCashEquivalents, shortTermInvestments, cashAndShortTermInvestments,
+      netReceivables, accountsReceivables, otherReceivables, inventory, prepaids,
+      otherCurrentAssets, totalCurrentAssets, propertyPlantEquipmentNet, goodwill,
+      intangibleAssets, goodwillAndIntangibleAssets, longTermInvestments, taxAssets,
+      otherNonCurrentAssets, totalNonCurrentAssets, otherAssets, totalAssets, totalPayables,
+      accountPayables, otherPayables, accruedExpenses, shortTermDebt,
+      capitalLeaseObligationsCurrent, taxPayables, deferredRevenue, otherCurrentLiabilities,
+      totalCurrentLiabilities, longTermDebt, capitalLeaseObligationsNonCurrent,
+      deferredRevenueNonCurrent, deferredTaxLiabilitiesNonCurrent, otherNonCurrentLiabilities,
+      totalNonCurrentLiabilities, otherLiabilities, capitalLeaseObligations, totalLiabilities,
+      treasuryStock, preferredStock, commonStock, retainedEarnings, additionalPaidInCapital,
+      accumulatedOtherComprehensiveIncomeLoss, otherTotalStockholdersEquity,
+      totalStockholdersEquity, totalEquity, minorityInterest, totalLiabilitiesAndTotalEquity,
+      totalInvestments, totalDebt, netDebt
+
+    cashflow:
+      date, symbol, reportedCurrency, cik, filingDate, acceptedDate, fiscalYear, period,
+      netIncome, depreciationAndAmortization, deferredIncomeTax, stockBasedCompensation,
+      changeInWorkingCapital, accountsReceivables, inventory, accountsPayables,
+      otherWorkingCapital, otherNonCashItems, netCashProvidedByOperatingActivities,
+      investmentsInPropertyPlantAndEquipment, acquisitionsNet, purchasesOfInvestments,
+      salesMaturitiesOfInvestments, otherInvestingActivities,
+      netCashProvidedByInvestingActivities, netDebtIssuance, longTermNetDebtIssuance,
+      shortTermNetDebtIssuance, netStockIssuance, netCommonStockIssuance, commonStockIssuance,
+      commonStockRepurchased, netPreferredStockIssuance, netDividendsPaid, commonDividendsPaid,
+      preferredDividendsPaid, otherFinancingActivities, netCashProvidedByFinancingActivities,
+      effectOfForexChangesOnCash, netChangeInCash, cashAtEndOfPeriod, cashAtBeginningOfPeriod,
+      operatingCashFlow, capitalExpenditure, freeCashFlow, incomeTaxesPaid, interestPaid
+
+    key_metrics:
+      symbol, date, fiscalYear, period, reportedCurrency, marketCap, enterpriseValue,
+      evToSales, evToOperatingCashFlow, evToFreeCashFlow, evToEBITDA, netDebtToEBITDA,
+      currentRatio, incomeQuality, grahamNumber, grahamNetNet, taxBurden, interestBurden,
+      workingCapital, investedCapital, returnOnAssets, operatingReturnOnAssets,
+      returnOnTangibleAssets, returnOnEquity, returnOnInvestedCapital, returnOnCapitalEmployed,
+      earningsYield, freeCashFlowYield, capexToOperatingCashFlow, capexToDepreciation,
+      capexToRevenue, salesGeneralAndAdministrativeToRevenue, researchAndDevelopementToRevenue,
+      stockBasedCompensationToRevenue, intangiblesToTotalAssets, averageReceivables,
+      averagePayables, averageInventory, daysOfSalesOutstanding, daysOfPayablesOutstanding,
+      daysOfInventoryOutstanding, operatingCycle, cashConversionCycle, freeCashFlowToEquity,
+      freeCashFlowToFirm, tangibleAssetValue, netCurrentAssetValue
+
+    ratios:
+      symbol, date, fiscalYear, period, reportedCurrency, grossProfitMargin, ebitMargin,
+      ebitdaMargin, operatingProfitMargin, pretaxProfitMargin,
+      continuousOperationsProfitMargin, netProfitMargin, bottomLineProfitMargin,
+      receivablesTurnover, payablesTurnover, inventoryTurnover, fixedAssetTurnover,
+      assetTurnover, currentRatio, quickRatio, solvencyRatio, cashRatio, priceToEarningsRatio,
+      priceToEarningsGrowthRatio, forwardPriceToEarningsGrowthRatio, priceToBookRatio,
+      priceToSalesRatio, priceToFreeCashFlowRatio, priceToOperatingCashFlowRatio,
+      debtToAssetsRatio, debtToEquityRatio, debtToCapitalRatio, longTermDebtToCapitalRatio,
+      financialLeverageRatio, workingCapitalTurnoverRatio, operatingCashFlowRatio,
+      operatingCashFlowSalesRatio, freeCashFlowOperatingCashFlowRatio,
+      debtServiceCoverageRatio, interestCoverageRatio, shortTermOperatingCashFlowCoverageRatio,
+      operatingCashFlowCoverageRatio, capitalExpenditureCoverageRatio,
+      dividendPaidAndCapexCoverageRatio, dividendPayoutRatio, dividendYield,
+      dividendYieldPercentage, revenuePerShare, netIncomePerShare, interestDebtPerShare,
+      cashPerShare, bookValuePerShare, tangibleBookValuePerShare, shareholdersEquityPerShare,
+      operatingCashFlowPerShare, capexPerShare, freeCashFlowPerShare, netIncomePerEBT,
+      ebtPerEbit, priceToFairValue, debtToMarketCap, effectiveTaxRate, enterpriseValueMultiple,
+      dividendPerShare
     """
     start = _parse_date(start_date)
     end = _parse_date(end_date)
@@ -113,23 +205,30 @@ def get_fundamental_statement(
         return f"error: start_date {start_date!r} is after end_date {end_date!r}"
 
     symbol = ticker.strip().upper()
-    frame = load_statement(statement, period)
 
+    # Validate against the parquet footer (schema-only read, cached), then pull
+    # just the projected columns for just this symbol — never the whole file.
     if columns:
-        missing = _missing_columns(columns, frame.columns)
+        valid = _valid_columns(statement, period)
+        missing = _missing_columns(columns, valid)
 
         if missing:
             return (
                 f"error: unknown column(s) {missing} for {statement} ({period}); "
-                f"valid columns: {', '.join(frame.columns)}"
+                f"valid columns: {', '.join(valid)}"
             )
 
-    rows = frame.loc[frame["symbol"] == symbol]
+    keep = None
 
-    if rows.empty:
+    if columns:
+        keep = ["date"] + [column for column in columns if column not in ("date", "symbol")]
+
+    frame = load_statement(statement, period, columns=keep, symbol=symbol)
+
+    if frame.empty:
         return f"error: no {statement} ({period}) data for ticker {symbol!r}"
 
-    rows = rows.loc[(rows["date"] >= start) & (rows["date"] <= end)]
+    rows = frame.loc[(frame["date"] >= start) & (frame["date"] <= end)]
 
     if rows.empty:
         return (
@@ -137,11 +236,10 @@ def get_fundamental_statement(
             f"between {start_date} and {end_date}"
         )
 
-    rows = rows.sort_values("date").drop(columns=["symbol"])
+    rows = rows.sort_values("date")
 
-    if columns:
-        keep = ["date"] + [column for column in columns if column not in ("date", "symbol")]
-        rows = rows.loc[:, keep]
+    if keep is None:
+        rows = rows.drop(columns=["symbol"])
 
     payload = {
         "ticker": symbol,
@@ -151,29 +249,3 @@ def get_fundamental_statement(
     }
 
     return yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
-
-
-@agent_tool(name="GetStatementColumns", safe_parallel=True)
-def get_statement_columns(
-    statement: Annotated[
-        Literal["income", "balance", "cashflow", "key_metrics", "ratios"],
-        Param(description="Which fundamental statement to list the column names for."),
-    ],
-) -> str:
-    """
-    List the exact column names available in one fundamental statement file,
-    as YAML (`statement` header plus a `columns` list). Column names are
-    identical for quarterly and annual data, so no period argument is needed.
-
-    Call this before GetFundamentalStatement and pass the subset you actually
-    need as its `columns` argument — pulling every field wastes context. This
-    is a cheap schema-only read, so calling it once per statement type is fine.
-    """
-    payload = {
-        "statement": statement,
-        "columns": statement_columns(statement),
-    }
-
-    return yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
-
-

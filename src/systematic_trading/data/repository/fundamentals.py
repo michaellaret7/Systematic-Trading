@@ -35,10 +35,20 @@ def panel_uri() -> str:
 
 
 def load_statement(
-    statement: str, period: str = "quarter", columns: list[str] | None = None
+    statement: str,
+    period: str = "quarter",
+    columns: list[str] | None = None,
+    symbol: str | None = None,
 ) -> pd.DataFrame:
-    """Load one raw statement, pulling only ``columns`` if given (parquet projection)."""
-    return pd.read_parquet(statement_uri(statement, period), columns=columns)
+    """Load one raw statement, reading only what's asked for.
+
+    ``columns`` projects (only those columns' bytes are fetched); ``symbol``
+    pushes a filter into the read so row groups whose symbol range can't
+    contain it are skipped entirely (files are sorted and row-grouped by symbol).
+    """
+    filters = [("symbol", "==", symbol)] if symbol else None
+
+    return pd.read_parquet(statement_uri(statement, period), columns=columns, filters=filters)
 
 
 def statement_columns(statement: str, period: str = "quarter") -> list[str]:
@@ -49,9 +59,14 @@ def statement_columns(statement: str, period: str = "quarter") -> list[str]:
         return pq.read_schema(file).names
 
 
+# ~9 groups per file: narrow symbol ranges per group (data is symbol-sorted), so a
+# one-ticker read prunes to a single group instead of downloading the whole file.
+ROW_GROUP_SIZE = 20_000
+
+
 def write_statement(frame: pd.DataFrame, statement: str, period: str) -> None:
-    """Overwrite one raw FMP statement parquet on S3."""
-    frame.to_parquet(statement_uri(statement, period), index=False)
+    """Overwrite one raw FMP statement parquet on S3, row-grouped for pruned reads."""
+    frame.to_parquet(statement_uri(statement, period), index=False, row_group_size=ROW_GROUP_SIZE)
 
 
 def load_panel(columns: list[str] | None = None) -> pd.DataFrame:
