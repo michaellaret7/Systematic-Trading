@@ -5,11 +5,12 @@ NASDAQ / NYSE / AMEX. For each requested period and statement type, fetch 30
 years of data for every symbol and write the whole universe in one shot to
 s3://<S3_BUCKET>/fundamentals/<statement>_<period>.parquet.
 
-The income (quarter) file is the canonical universe: only symbols whose income
-rows are USD-denominated at quarterly cadence (``usd_quarterly_symbols``) are
-written, and every other file is restricted to the same symbols. A run that
-pushes income/quarter re-derives that keep-set from fresh data; any other run
-aligns to the income_quarter file already on S3.
+The active universe is recorded as ``fundamentals/universe.csv`` — the single
+source of truth for tickers. It is derived from the income (quarter) file:
+only symbols whose income rows are USD-denominated at quarterly cadence
+(``usd_quarterly_symbols``) are kept, and every statement file is restricted
+to those symbols. A run that pushes income/quarter re-derives the universe
+from fresh data and rewrites the CSV; any other run aligns to the CSV on S3.
 
 Usage — args are any mix of periods and statement names; omitted means all:
     uv run python scripts/push_fundamentals.py                  # everything
@@ -29,7 +30,13 @@ import pandas as pd
 import requests
 
 from systematic_trading.data.providers.fmp import FMPClient
-from systematic_trading.data.repository import load_statement, statement_uri, write_statement
+from systematic_trading.data.repository import (
+    load_statement,
+    load_universe,
+    statement_uri,
+    write_statement,
+    write_universe,
+)
 from systematic_trading.data.universe import EXCLUDED_SYMBOLS, drop_symbols, usd_quarterly_symbols
 
 MARKET_CAP_FLOOR = 2_000_000_000
@@ -167,9 +174,10 @@ def main() -> None:
     print(f"Screener: {len(screened)} symbols (mcap > $2bn, price > $5, {EXCHANGES}).")
     print(f"Pushing: {', '.join(statements)} x {', '.join(periods)}")
 
-    # Canonical universe: push income/quarter first and derive the USD-quarterly
-    # keep-set from its fresh rows; runs not touching that file align to the
-    # symbols already in it on S3.
+    # Canonical universe: push income/quarter first, derive the USD-quarterly
+    # keep-set from its fresh rows, and record it as universe.csv — the single
+    # source of truth for tickers. Runs not touching income/quarter align to
+    # the universe.csv already on S3.
     pushing_income_quarter = "income" in statements and "quarter" in periods
 
     if pushing_income_quarter:
@@ -182,11 +190,13 @@ def main() -> None:
 
         income, _ = drop_symbols(income, set(dropped))
         write_and_verify(income, "income", "quarter", failures)
-    else:
-        existing = load_statement("income", "quarter", columns=["symbol"])
-        keep = set(existing["symbol"].unique())
 
-        print(f"Universe aligned to existing income_quarter file ({len(keep)} symbols).")
+        write_universe(sorted(keep))
+        print(f"Universe CSV written: {len(keep)} symbols.")
+    else:
+        keep = set(load_universe())
+
+        print(f"Universe aligned to universe.csv ({len(keep)} symbols).")
 
     symbols = sorted(set(screened) & keep)
 

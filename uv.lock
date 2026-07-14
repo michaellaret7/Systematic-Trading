@@ -4293,6 +4293,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "agent-harness" },
+    { name = "boto3" },
     { name = "lumibot" },
     { name = "numpy" },
     { name = "pandas" },
@@ -4316,6 +4317,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "agent-harness", git = "https://github.com/michaellaret7/Agent-Harness?subdirectory=packages%2Fagent_harness" },
+    { name = "boto3", specifier = ">=1.43.0" },
     { name = "lumibot", specifier = "==4.5.63" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pandas", specifier = ">=2.3.3" },

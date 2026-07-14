@@ -10,8 +10,10 @@ runner must construct a fresh Agent per ticker rather than reusing this one.
 """
 
 from agent_harness.agent import Agent
+from agent_harness.decorator import bind_tool
 
 from systematic_trading.agents.tools.shared.fundamentals import get_fundamental_statement
+from systematic_trading.agents.tools.shared.trade_ideas import submit_trade_idea
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.mgmt_sub_agent import (
     MGMT_SUB_AGENT_CONFIG,
 )
@@ -24,11 +26,18 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.risk_sub_
 )
 
 
+STRATEGY = "csf_champions"
+MODEL = "openai/gpt-5.6-sol"
+
 ticker_analyst = Agent(
     provider="openrouter",
-    model="deepseek/deepseek-v4-pro",
+    model=MODEL,
     system=SYSTEM,
-    tools=[get_fundamental_statement],
+    tools=[
+        get_fundamental_statement,
+        # strategy/model are stamped onto every submitted idea; hidden from the LLM schema.
+        bind_tool(submit_trade_idea, _strategy=STRATEGY, _model=MODEL),
+    ],
     subagents=[
         MGMT_SUB_AGENT_CONFIG,
         MOAT_SUB_AGENT_CONFIG,

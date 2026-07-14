@@ -111,7 +111,7 @@ MGMT_SUB_AGENT_CONFIG = SubAgentConfig(
     system=SYSTEM,
     tools=(),
     provider="openrouter",
-    model="deepseek/deepseek-v4-flash",
+    model="deepseek/deepseek-v4-pro",
 )
 
 

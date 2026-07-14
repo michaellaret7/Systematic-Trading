@@ -45,6 +45,15 @@ def fmp_api_key() -> str:
     return _require("FMP_API_KEY")
 
 
+def aws_region() -> str:
+    """AWS region hosting the DynamoDB trade ledger (defaults to us-east-1).
+
+    Uses botocore's standard variable name so the same setting steers every
+    AWS SDK client; only DynamoDB needs it passed explicitly.
+    """
+    return os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
+
 def s3_bucket() -> str:
     """S3 bucket holding the fundamentals data repository.
 

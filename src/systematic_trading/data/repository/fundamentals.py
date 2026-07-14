@@ -14,6 +14,7 @@ from systematic_trading.config import s3_bucket
 STATEMENTS = ("income", "balance", "cashflow", "key_metrics", "ratios")
 PERIODS = ("quarter", "annual")
 PANEL_KEY = "screeners/fundamentals_panel.parquet"
+UNIVERSE_KEY = "fundamentals/universe.csv"
 
 
 # Retrieve the S3 uri for the raw FMP statement parquet.
@@ -84,3 +85,20 @@ def panel_symbols() -> list[str]:
     panel = load_panel(columns=["symbol"])
 
     return sorted(panel["symbol"].unique())
+
+
+def universe_uri() -> str:
+    """S3 URI of the active-universe CSV — the single source of truth for tickers."""
+    return f"s3://{s3_bucket()}/{UNIVERSE_KEY}"
+
+
+def load_universe() -> list[str]:
+    """Symbols of the active universe, alphabetical."""
+    frame = pd.read_csv(universe_uri())
+
+    return sorted(frame["symbol"])
+
+
+def write_universe(symbols: list[str]) -> None:
+    """Overwrite the active-universe CSV on S3."""
+    pd.DataFrame({"symbol": sorted(symbols)}).to_csv(universe_uri(), index=False)

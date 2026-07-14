@@ -7,6 +7,7 @@ requires-python = ">=3.12,<3.14"
 authors = [{ name = "Michael Laret", email = "michaellaret7@gmail.com" }]
 dependencies = [
     "agent-harness",
+    "boto3>=1.43.0",
     # Core infrastructure: backtesting + paper/live execution, native Alpaca broker.
     # Pulls in alpaca-py, pandas, numpy, polars, pyarrow, etc. transitively.
     "lumibot==4.5.63",
