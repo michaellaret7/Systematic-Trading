@@ -32,63 +32,108 @@ def run_screen(
     panel's newest filing), drops stale listings, optionally drops excluded
     sectors, scores the cross-section, and returns every row ranked by score.
     """
-    # The "pretend it's this date" moment: the caller's as_of, else the newest filing (now).
-    cutoff = pd.Timestamp(as_of) if as_of is not None else panel["filingDate"].max()
 
-    # Collapse history to one row per symbol: latest filing public at the cutoff, dead filers dropped.
+    # Build one fresh, eligible row per ticker.
+    snapshot = _prepare_snapshot(panel, as_of, excluded_sectors, drop_missing_sector)
+
+    # Add each requested metric's spread from its sector median.
+    _add_sector_relative_columns(snapshot, sector_relative_columns)
+
+    # Calculate the final composite or grouped score.
+    _add_scores(
+        snapshot,
+        score_weights,
+        score_groups,
+        score_group_weights,
+        complete_score_groups,
+    )
+
+    return snapshot.sort_values("score", ascending=False, ignore_index=True)
+
+
+def _prepare_snapshot(
+    panel: pd.DataFrame,
+    as_of: pd.Timestamp | str | None,
+    excluded_sectors: tuple[str, ...],
+    drop_missing_sector: bool,
+) -> pd.DataFrame:
+    """Build the fresh point-in-time cross-section used for scoring."""
+    cutoff = pd.Timestamp(as_of) if as_of is not None else panel["filingDate"].max()
     snapshot = cross_section(panel, cutoff)
 
-    # Only bother with sector filtering if the screener asked for it.
-    # If requested, remove banned sectors (and, if requested, rows with no sector info at all).
     if excluded_sectors or drop_missing_sector:
         snapshot = drop_sectors(snapshot, excluded_sectors, drop_missing_sector)
 
-    # Sector-relative views (metric minus its sector median), available to scores.
-    for column in sector_relative_columns:
+    return snapshot
+
+
+def _add_sector_relative_columns(
+    snapshot: pd.DataFrame,
+    columns: tuple[str, ...],
+) -> None:
+    """Add requested metrics as spreads from their sector medians."""
+    for column in columns:
         snapshot[f"{column}_vs_sector"] = sector_relative(snapshot, column)
 
-    # Score every company against the full cross-section (before gating, so ranks mean
-    # "percentile of the market" and stay comparable across screens and dates).
+
+def _add_scores(
+    snapshot: pd.DataFrame,
+    score_weights: dict[str, float] | None,
+    score_groups: dict[str, dict[str, float]] | None,
+    score_group_weights: dict[str, float] | None,
+    complete_score_groups: tuple[str, ...],
+) -> None:
+    """Add either one composite score or a weighted combination of score groups."""
     if score_groups is None:
         if score_weights is None:
             raise ValueError("score_weights or score_groups must be provided")
 
         snapshot["score"] = composite_score(snapshot, score_weights)
-    else:
-        if score_weights is not None:
-            raise ValueError("provide score_weights or score_groups, not both")
-        if score_group_weights is None or set(score_group_weights) != set(score_groups):
-            raise ValueError("score_group_weights must match score_groups")
-        if any(weight <= 0 for weight in score_group_weights.values()):
-            raise ValueError("score group weights must be positive")
+        return
 
-        for name, weights in score_groups.items():
-            columns = list(weights)
-            count_column = f"{name}_metric_count"
-            coverage_column = f"{name}_metric_coverage"
-            score_column = f"{name}_score"
+    if score_weights is not None:
+        raise ValueError("provide score_weights or score_groups, not both")
+    if score_group_weights is None or set(score_group_weights) != set(score_groups):
+        raise ValueError("score_group_weights must match score_groups")
+    if any(weight <= 0 for weight in score_group_weights.values()):
+        raise ValueError("score group weights must be positive")
 
-            snapshot[count_column] = snapshot[columns].notna().sum(axis=1)
-            snapshot[coverage_column] = snapshot[count_column] / len(columns)
-            snapshot[score_column] = composite_score(snapshot, weights)
+    _add_group_scores(snapshot, score_groups, score_group_weights, complete_score_groups)
 
-            if name in complete_score_groups:
-                snapshot[score_column] = snapshot[score_column].where(
-                    snapshot[coverage_column] == 1.0
-                )
 
-        group_scores = pd.DataFrame(
-            {name: snapshot[f"{name}_score"] for name in score_groups},
-            index=snapshot.index,
-        )
-        group_weights = pd.Series(score_group_weights, dtype=float)
-        weighted = group_scores.mul(group_weights, axis="columns")
-        snapshot["score"] = (
-            weighted.sum(axis=1, min_count=len(group_scores.columns)) / group_weights.sum()
-        ).round(1)
+def _add_group_scores(
+    snapshot: pd.DataFrame,
+    score_groups: dict[str, dict[str, float]],
+    group_weights: dict[str, float],
+    complete_groups: tuple[str, ...],
+) -> None:
+    """Add each group score and combine them into the final weighted score."""
+    for name, weights in score_groups.items():
+        columns = list(weights)
+        count_column = f"{name}_metric_count"
+        coverage_column = f"{name}_metric_coverage"
+        score_column = f"{name}_score"
 
-    # Best score first, with missing scores last and the index renumbered 0..n.
-    return snapshot.sort_values("score", ascending=False, ignore_index=True)
+        snapshot[count_column] = snapshot[columns].notna().sum(axis=1)
+        snapshot[coverage_column] = snapshot[count_column] / len(columns)
+        snapshot[score_column] = composite_score(snapshot, weights)
+
+        if name in complete_groups:
+            snapshot[score_column] = snapshot[score_column].where(
+                snapshot[coverage_column] == 1.0
+            )
+
+    scores = pd.DataFrame(
+        {name: snapshot[f"{name}_score"] for name in score_groups},
+        index=snapshot.index,
+    )
+
+    weights = pd.Series(group_weights, dtype=float)
+    weighted_scores = scores.mul(weights, axis="columns")
+
+    snapshot["score"] = (
+        weighted_scores.sum(axis=1, min_count=len(scores.columns)) / weights.sum()
+    ).round(1)
 
 
 def cross_section(panel: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:

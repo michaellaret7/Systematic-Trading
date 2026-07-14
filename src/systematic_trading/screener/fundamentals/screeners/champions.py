@@ -105,5 +105,5 @@ def screen(
 
 
 if __name__ == "__main__":
-    champions = screen(as_of="2025-07-09")
+    champions = screen(as_of="2026-07-09")
     print(champions.head(100)[DISPLAY_COLUMNS].to_string(index=False))

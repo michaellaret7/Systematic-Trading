@@ -5,6 +5,12 @@ NASDAQ / NYSE / AMEX. For each requested period and statement type, fetch 30
 years of data for every symbol and write the whole universe in one shot to
 s3://<S3_BUCKET>/fundamentals/<statement>_<period>.parquet.
 
+The income (quarter) file is the canonical universe: only symbols whose income
+rows are USD-denominated at quarterly cadence (``usd_quarterly_symbols``) are
+written, and every other file is restricted to the same symbols. A run that
+pushes income/quarter re-derives that keep-set from fresh data; any other run
+aligns to the income_quarter file already on S3.
+
 Usage — args are any mix of periods and statement names; omitted means all:
     uv run python scripts/push_fundamentals.py                  # everything
     uv run python scripts/push_fundamentals.py annual           # all statements, annual
@@ -24,7 +30,7 @@ import requests
 
 from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.data.repository import load_statement, statement_uri, write_statement
-from systematic_trading.data.universe import EXCLUDED_SYMBOLS
+from systematic_trading.data.universe import EXCLUDED_SYMBOLS, drop_symbols, usd_quarterly_symbols
 
 MARKET_CAP_FLOOR = 2_000_000_000
 PRICE_FLOOR = 5
@@ -83,11 +89,12 @@ def fetch_with_retry(client: FMPClient, method: str, symbol: str, period: str) -
     raise AssertionError("unreachable")
 
 
-def push_statement(client: FMPClient, statement: str, period: str, symbols: list[str]) -> None:
-    """Fetch every symbol for one statement/period and write the file to S3."""
+def fetch_statement(
+    client: FMPClient, statement: str, period: str, symbols: list[str]
+) -> tuple[pd.DataFrame, list[str]]:
+    """Fetch every symbol's rows for one statement/period, plus the symbols that failed."""
     method = STATEMENTS[statement]
     tag = f"{statement}_{period}"
-    uri = statement_uri(statement, period)
 
     frames: list[pd.DataFrame] = []
     failures: list[str] = []
@@ -108,6 +115,16 @@ def push_statement(client: FMPClient, statement: str, period: str, symbols: list
 
     combined = pd.concat(frames, ignore_index=True)
     combined = combined.sort_values(["symbol", "date"], ignore_index=True)
+
+    return combined, failures
+
+
+def write_and_verify(
+    combined: pd.DataFrame, statement: str, period: str, failures: list[str]
+) -> None:
+    """Write one statement parquet to S3 and verify the round trip."""
+    tag = f"{statement}_{period}"
+    uri = statement_uri(statement, period)
 
     print(
         f"[{tag}] writing {len(combined)} rows x {combined.shape[1]} columns "
@@ -145,14 +162,41 @@ def main() -> None:
     statements = [a for a in args if a in STATEMENTS] or list(STATEMENTS)
 
     client = FMPClient()
-    symbols = screen_universe(client)
+    screened = screen_universe(client)
 
-    print(f"Screener: {len(symbols)} symbols (mcap > $2bn, price > $5, {EXCHANGES}).")
+    print(f"Screener: {len(screened)} symbols (mcap > $2bn, price > $5, {EXCHANGES}).")
     print(f"Pushing: {', '.join(statements)} x {', '.join(periods)}")
+
+    # Canonical universe: push income/quarter first and derive the USD-quarterly
+    # keep-set from its fresh rows; runs not touching that file align to the
+    # symbols already in it on S3.
+    pushing_income_quarter = "income" in statements and "quarter" in periods
+
+    if pushing_income_quarter:
+        income, failures = fetch_statement(client, "income", "quarter", screened)
+        keep = usd_quarterly_symbols(income)
+        dropped = sorted(set(income["symbol"].unique()) - keep)
+
+        print(f"Universe filter: dropping {len(dropped)} non-USD/non-quarterly symbols:")
+        print(f"  {', '.join(dropped)}")
+
+        income, _ = drop_symbols(income, set(dropped))
+        write_and_verify(income, "income", "quarter", failures)
+    else:
+        existing = load_statement("income", "quarter", columns=["symbol"])
+        keep = set(existing["symbol"].unique())
+
+        print(f"Universe aligned to existing income_quarter file ({len(keep)} symbols).")
+
+    symbols = sorted(set(screened) & keep)
 
     for period in periods:
         for statement in statements:
-            push_statement(client, statement, period, symbols)
+            if statement == "income" and period == "quarter":
+                continue  # pushed above as the canonical-universe file
+
+            combined, failures = fetch_statement(client, statement, period, symbols)
+            write_and_verify(combined, statement, period, failures)
 
 
 if __name__ == "__main__":
