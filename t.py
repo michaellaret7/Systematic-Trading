@@ -15,7 +15,7 @@ from systematic_trading.agents.tools.shared.fundamentals import (
     get_fundamental_statement,
 )
 
-TICKER = "HRMY"
+TICKER = "BMI"
 
 SYSTEM = """
 <role>
@@ -64,5 +64,9 @@ agent = Agent(
     max_iters=30,
 )
 
-result = agent.run(task=f"Run a full fundamental analysis on {TICKER} and give a BUY, SELL, or DON'T TOUCH verdict.")
-print(result)
+# result = agent.run(task=f"Run a full fundamental analysis on {TICKER} and give a BUY, SELL, or DON'T TOUCH verdict.")
+# print(result)
+
+# [thing_you_want for item in list (expression can follow)]
+bruh = [tool["function"]["name"] for tool in agent.tools]
+print(bruh)

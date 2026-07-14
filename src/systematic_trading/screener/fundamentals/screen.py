@@ -1,8 +1,7 @@
-"""Panel-agnostic screen machinery: point-in-time snapshots, gating, and scoring.
+"""Panel-agnostic screen machinery: point-in-time snapshots and scoring.
 
-Each screener module owns its opinions (which metrics to gate, thresholds,
-score weights, sector exclusions); this module owns the mechanics that are
-identical across screeners.
+Each screener module owns its score weights and sector exclusions; this module
+owns the mechanics that are identical across screeners.
 
 Panel contract: a DataFrame with one row per ``(symbol, date)``, a
 ``filingDate`` timestamp marking when the row became publicly knowable, and
@@ -18,19 +17,20 @@ MAX_STALENESS_DAYS = 270
 
 def run_screen(
     panel: pd.DataFrame,
-    criteria: dict[str, float],
-    score_weights: dict[str, int],
+    score_weights: dict[str, float] | None = None,
     as_of: pd.Timestamp | str | None = None,
     excluded_sectors: tuple[str, ...] = (),
     drop_missing_sector: bool = False,
     sector_relative_columns: tuple[str, ...] = (),
+    score_groups: dict[str, dict[str, float]] | None = None,
+    score_group_weights: dict[str, float] | None = None,
+    complete_score_groups: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """The standard screen pipeline over any metrics panel.
 
     Takes each symbol's latest row visible at ``as_of`` (defaults to the
     panel's newest filing), drops stale listings, optionally drops excluded
-    sectors, scores the cross-section, and returns rows passing every
-    criterion, ranked by score descending.
+    sectors, scores the cross-section, and returns every row ranked by score.
     """
     # The "pretend it's this date" moment: the caller's as_of, else the newest filing (now).
     cutoff = pd.Timestamp(as_of) if as_of is not None else panel["filingDate"].max()
@@ -43,19 +43,52 @@ def run_screen(
     if excluded_sectors or drop_missing_sector:
         snapshot = drop_sectors(snapshot, excluded_sectors, drop_missing_sector)
 
-    # Sector-relative views (metric minus its sector median), available to gates and scores.
+    # Sector-relative views (metric minus its sector median), available to scores.
     for column in sector_relative_columns:
         snapshot[f"{column}_vs_sector"] = sector_relative(snapshot, column)
 
     # Score every company against the full cross-section (before gating, so ranks mean
     # "percentile of the market" and stay comparable across screens and dates).
-    snapshot["score"] = composite_score(snapshot, score_weights)
+    if score_groups is None:
+        if score_weights is None:
+            raise ValueError("score_weights or score_groups must be provided")
 
-    # Keep only companies clearing every _min/_max threshold gate.
-    matches = snapshot[passes_gates(snapshot, criteria)]
+        snapshot["score"] = composite_score(snapshot, score_weights)
+    else:
+        if score_weights is not None:
+            raise ValueError("provide score_weights or score_groups, not both")
+        if score_group_weights is None or set(score_group_weights) != set(score_groups):
+            raise ValueError("score_group_weights must match score_groups")
+        if any(weight <= 0 for weight in score_group_weights.values()):
+            raise ValueError("score group weights must be positive")
 
-    # Survivors, best score first, index renumbered 0..n.
-    return matches.sort_values("score", ascending=False, ignore_index=True)
+        for name, weights in score_groups.items():
+            columns = list(weights)
+            count_column = f"{name}_metric_count"
+            coverage_column = f"{name}_metric_coverage"
+            score_column = f"{name}_score"
+
+            snapshot[count_column] = snapshot[columns].notna().sum(axis=1)
+            snapshot[coverage_column] = snapshot[count_column] / len(columns)
+            snapshot[score_column] = composite_score(snapshot, weights)
+
+            if name in complete_score_groups:
+                snapshot[score_column] = snapshot[score_column].where(
+                    snapshot[coverage_column] == 1.0
+                )
+
+        group_scores = pd.DataFrame(
+            {name: snapshot[f"{name}_score"] for name in score_groups},
+            index=snapshot.index,
+        )
+        group_weights = pd.Series(score_group_weights, dtype=float)
+        weighted = group_scores.mul(group_weights, axis="columns")
+        snapshot["score"] = (
+            weighted.sum(axis=1, min_count=len(group_scores.columns)) / group_weights.sum()
+        ).round(1)
+
+    # Best score first, with missing scores last and the index renumbered 0..n.
+    return snapshot.sort_values("score", ascending=False, ignore_index=True)
 
 
 def cross_section(panel: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
@@ -99,37 +132,23 @@ def sector_relative(snapshot: pd.DataFrame, column: str) -> pd.Series:
     return snapshot[column] - sector_median
 
 
-def composite_score(snapshot: pd.DataFrame, score_weights: dict[str, int]) -> pd.Series:
+def composite_score(snapshot: pd.DataFrame, score_weights: dict[str, float]) -> pd.Series:
     """Cross-sectional percentile-rank composite, 0-100.
 
-    ``score_weights`` maps metric column -> +1 if higher raises the score, -1 if
-    lower raises it. NaN metrics are skipped per row, never penalized.
+    The sign of each weight sets whether higher or lower is better; its absolute
+    value controls the metric's contribution. NaN metrics are skipped per row.
     """
+    if not score_weights or any(weight == 0 for weight in score_weights.values()):
+        raise ValueError("score weights must be non-zero")
+
     ranks = pd.DataFrame(index=snapshot.index)
 
-    for column, sign in score_weights.items():
-        ranks[column] = (sign * snapshot[column]).rank(pct=True)
+    for column, weight in score_weights.items():
+        direction = 1 if weight > 0 else -1
+        ranks[column] = (direction * snapshot[column]).rank(pct=True)
 
-    return (ranks.mean(axis=1, skipna=True) * 100.0).round(1)
+    weights = pd.Series({column: abs(weight) for column, weight in score_weights.items()})
+    weighted_sum = ranks.mul(weights, axis="columns").sum(axis=1, min_count=1)
+    available_weight = ranks.notna().mul(weights, axis="columns").sum(axis=1)
 
-
-def passes_gates(snapshot: pd.DataFrame, criteria: dict[str, float]) -> pd.Series:
-    """True where a row satisfies every criterion; NaN metrics fail their check.
-
-    Criterion keys name a metric column plus a ``_min``/``_max`` suffix, e.g.
-    ``"roic_ttm_min": 0.15`` requires ``snapshot["roic_ttm"] >= 0.15``.
-    """
-    result = pd.Series(True, index=snapshot.index)
-
-    for key, threshold in criteria.items():
-        column, _, bound = key.rpartition("_")
-
-        if not column or bound not in ("min", "max"):
-            raise ValueError(f"criterion {key!r} must end in '_min' or '_max'")
-
-        if bound == "min":
-            result &= snapshot[column] >= threshold
-        else:
-            result &= snapshot[column] <= threshold
-
-    return result
+    return (weighted_sum / available_weight * 100.0).round(1)

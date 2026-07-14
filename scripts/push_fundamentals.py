@@ -24,6 +24,7 @@ import requests
 
 from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.data.repository import load_statement, statement_uri, write_statement
+from systematic_trading.data.universe import EXCLUDED_SYMBOLS
 
 MARKET_CAP_FLOOR = 2_000_000_000
 PRICE_FLOOR = 5
@@ -64,7 +65,7 @@ def screen_universe(client: FMPClient) -> list[str]:
         exchange=EXCHANGES,
     )
 
-    return sorted(screened["symbol"])
+    return sorted(set(screened["symbol"]) - EXCLUDED_SYMBOLS)
 
 
 def fetch_with_retry(client: FMPClient, method: str, symbol: str, period: str) -> pd.DataFrame:

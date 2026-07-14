@@ -9,6 +9,8 @@ def add_valuation(panel: pd.DataFrame) -> pd.DataFrame:
     """Valuation context metrics."""
     panel["fcf_yield_ttm"] = safe_ratio(panel["freeCashFlow_ttm"], panel["marketCap"])
     panel["fcf_adj_yield_ttm"] = safe_ratio(panel["fcf_adj_ttm"], panel["marketCap"])
+    panel["earnings_yield_ttm"] = safe_ratio(panel["netIncome_ttm"], panel["marketCap"])
+    panel["owner_earnings_yield_ttm"] = safe_ratio(panel["owner_earnings_ttm"], panel["marketCap"])
     panel["ev_to_ebitda_ttm"] = safe_ratio(panel["enterpriseValue"], panel["ebitda_ttm"])
 
     return panel

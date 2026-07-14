@@ -1,8 +1,8 @@
 """Screen machinery for screener.
 
 Small synthetic panel with known dates and metrics; checks the point-in-time
-cross-section, staleness drop, criteria gating (including NaN-fails), scoring
-direction, and sector exclusion. No network, no S3.
+cross-section, staleness drop, scoring direction, weighted score groups, and
+sector exclusion. No network, no S3.
 """
 
 import numpy as np
@@ -13,7 +13,6 @@ from systematic_trading.screener.fundamentals.screen import (
     composite_score,
     cross_section,
     drop_sectors,
-    passes_gates,
     run_screen,
     sector_relative,
 )
@@ -69,21 +68,6 @@ def test_cross_section_drops_stale_symbols():
     assert "DEAD" not in snapshot["symbol"].values  # last quarter ~2 years old
 
 
-def test_passes_min_max_and_nan():
-    snapshot = pd.DataFrame({"roic_ttm": [0.20, 0.10, np.nan], "debt": [1.0, 5.0, 1.0]})
-
-    ok = passes_gates(snapshot, {"roic_ttm_min": 0.15, "debt_max": 2.0})
-
-    assert ok.tolist() == [True, False, False]  # NaN fails its check
-
-
-def test_passes_rejects_malformed_key():
-    snapshot = pd.DataFrame({"roic_ttm": [0.2]})
-
-    with pytest.raises(ValueError, match="_min' or '_max"):
-        passes_gates(snapshot, {"roic_ttm": 0.15})
-
-
 def test_composite_score_direction():
     snapshot = pd.DataFrame({"good": [1.0, 2.0, 3.0], "bad": [3.0, 2.0, 1.0]})
 
@@ -91,6 +75,45 @@ def test_composite_score_direction():
 
     # Row 2 is best on both metrics, row 0 worst on both.
     assert score.tolist() == sorted(score.tolist())
+
+
+def test_composite_score_uses_weight_magnitude():
+    snapshot = pd.DataFrame({"primary": [1.0, 2.0], "secondary": [2.0, 1.0]})
+
+    score = composite_score(snapshot, {"primary": 3, "secondary": 1})
+
+    assert score.tolist() == [62.5, 87.5]
+
+
+def test_run_screen_supports_complete_weighted_score_groups():
+    panel = pd.DataFrame(
+        {
+            "symbol": ["A", "B", "C"],
+            "date": pd.to_datetime(["2026-03-31"] * 3),
+            "filingDate": pd.to_datetime(["2026-05-01"] * 3),
+            "quality": [3.0, 2.0, 1.0],
+            "cash_yield": [3.0, 1.0, 2.0],
+            "multiple": [1.0, 2.0, np.nan],
+        }
+    )
+
+    result = run_screen(
+        panel,
+        as_of="2026-06-01",
+        score_groups={
+            "quality": {"quality": 1},
+            "value": {"cash_yield": 3, "multiple": -1},
+        },
+        score_group_weights={"quality": 0.6, "value": 0.4},
+        complete_score_groups=("value",),
+    )
+
+    assert result["symbol"].tolist() == ["A", "B", "C"]
+    assert result["quality_metric_count"].tolist() == [1, 1, 1]
+    assert result["value_metric_count"].tolist() == [2, 2, 1]
+    assert result["value_metric_coverage"].tolist() == [1.0, 1.0, 0.5]
+    assert result.loc[0, "score"] == pytest.approx(100.0)
+    assert np.isnan(result.loc[2, "score"])
 
 
 def test_drop_sectors():
@@ -118,14 +141,13 @@ def test_sector_relative():
     assert np.isnan(spread.iloc[3])
 
 
-def test_run_screen_end_to_end():
+def test_run_screen_returns_every_fresh_company():
     result = run_screen(
         make_panel(),
-        criteria={"roic_ttm_min": 0.25},
         score_weights={"roic_ttm": 1},
         as_of=CUTOFF,
     )
 
-    # Only GOOD clears 25% ROIC at the cutoff (NEW's 0.90 quarter isn't public yet).
-    assert result["symbol"].tolist() == ["GOOD"]
+    # NEW's unpublished 0.90 quarter is excluded, but its latest public row remains ranked.
+    assert result["symbol"].tolist() == ["GOOD", "NEW"]
     assert "score" in result.columns

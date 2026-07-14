@@ -277,4 +277,6 @@ def test_valuation_metrics():
 
     assert prof["fcf_yield_ttm"] == pytest.approx(56.0 / 1000.0)
     assert prof["fcf_adj_yield_ttm"] == pytest.approx(48.0 / 1000.0)
+    assert prof["earnings_yield_ttm"] == pytest.approx(56.0 / 1000.0)
+    assert prof["owner_earnings_yield_ttm"] == pytest.approx(68.0 / 1000.0)
     assert prof["ev_to_ebitda_ttm"] == pytest.approx(10.5)
