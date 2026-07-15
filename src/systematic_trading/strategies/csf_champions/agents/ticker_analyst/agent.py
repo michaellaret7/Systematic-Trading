@@ -25,39 +25,30 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.risk_sub_
     RISK_SUB_AGENT_CONFIG,
 )
 
-
 STRATEGY = "csf_champions"
 MODEL = "openai/gpt-5.6-sol"
 
-ticker_analyst = Agent(
-    provider="openrouter",
-    model=MODEL,
-    system=SYSTEM,
-    tools=[
-        get_fundamental_statement,
-        # strategy/model are stamped onto every submitted idea; hidden from the LLM schema.
-        bind_tool(submit_trade_idea, _strategy=STRATEGY, _model=MODEL),
-    ],
-    subagents=[
-        MGMT_SUB_AGENT_CONFIG,
-        MOAT_SUB_AGENT_CONFIG,
-        RISK_SUB_AGENT_CONFIG,
-    ],
-)
+def build_ticker_analyst() -> Agent:
+    """Construct a fresh ticker-analyst agent.
 
-
-if __name__ == "__main__":
-    # Standalone test run: the harness reads env but never loads .env itself,
-    # so the entry point loads it before the client is built.
-    from dotenv import load_dotenv
-
-    from agent_harness.sinks import LogSink
-
-    load_dotenv()
-
-    report = ticker_analyst.run(
-        "Analyze (ticker: PAYP) and deliver your verdict.",
-        sink=LogSink("ticker_analyst"),
+    `Agent` accumulates message history across `run()` calls, so batch runners
+    must build one instance per ticker (and per thread) rather than sharing a
+    singleton — see the module docstring.
+    """
+    return Agent(
+        provider="openrouter",
+        model=MODEL,
+        system=SYSTEM,
+        tools=[
+            get_fundamental_statement,
+            # strategy/model are stamped onto every submitted idea; hidden from the LLM schema.
+            bind_tool(submit_trade_idea, _strategy=STRATEGY, _model=MODEL),
+        ],
+        subagents=[
+            MGMT_SUB_AGENT_CONFIG,
+            MOAT_SUB_AGENT_CONFIG,
+            RISK_SUB_AGENT_CONFIG,
+        ],
     )
 
-    print(report)
+

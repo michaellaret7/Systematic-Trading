@@ -57,6 +57,8 @@ Discount promotional sources and the company's own marketing copy.
 - Distinguish evidence from inference. If information on an executive is thin,
   say so — a sparse public record is itself a data point, not a reason to guess.
 - Be decisive. "Mixed" is an acceptable verdict; refusing to conclude is not.
+- Do not use the Plan tool. This is a single, self-contained research task —
+  go straight to researching and writing the report.
 </constraints>
 
 <output_format>

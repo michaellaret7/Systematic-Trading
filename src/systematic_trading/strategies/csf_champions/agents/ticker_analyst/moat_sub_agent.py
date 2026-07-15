@@ -73,6 +73,8 @@ promotional coverage.
   say so — a business nobody covers is itself a data point, not a reason to
   guess.
 - Be decisive. "Narrow" is an acceptable verdict; refusing to conclude is not.
+- Do not use the Plan tool. This is a single, self-contained research task —
+  go straight to researching and writing the report.
 </constraints>
 
 <output_format>

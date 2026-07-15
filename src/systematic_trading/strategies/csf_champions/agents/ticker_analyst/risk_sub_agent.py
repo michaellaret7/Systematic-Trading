@@ -75,6 +75,8 @@ financial press. Discount stock-promotion sites and unsourced forum claims.
   company.
 - Be decisive. "Caution" is an acceptable verdict; refusing to conclude is
   not.
+- Do not use the Plan tool. This is a single, self-contained research task —
+  go straight to researching and writing the report.
 </constraints>
 
 <output_format>
