@@ -10,6 +10,7 @@ runner must construct a fresh Agent per ticker rather than reusing this one.
 """
 
 from agent_harness.agent import Agent
+from agent_harness.base_tools.deploy_subagent import LogSink
 from agent_harness.decorator import bind_tool
 
 from systematic_trading.agents.tools.shared.fundamentals import get_fundamental_statement
@@ -52,3 +53,11 @@ def build_ticker_analyst() -> Agent:
     )
 
 
+ticker_analyst = build_ticker_analyst()
+ticker = "SLDE"
+ticker_analyst.run(
+    f"Analyze (ticker: {ticker}) and deliver your verdict.",
+    sink=LogSink(f"ticker_analyst_{ticker}"),
+)
+
+print(ticker_analyst)

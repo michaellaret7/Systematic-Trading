@@ -41,6 +41,14 @@ def submit_trade_idea(
         Literal["long", "short"],
         Param(description="Direction of the idea: 'long' to buy, 'short' to sell short."),
     ],
+    score: Annotated[
+        float,
+        Param(
+            description="Your 1-10 conviction score for the business at today's price.",
+            min_val=1.0,
+            max_val=10.0,
+        ),
+    ],
     allocation_pct: Annotated[
         float,
         Param(
@@ -84,6 +92,7 @@ def submit_trade_idea(
         strategy=_strategy,
         ticker=symbol,
         side=side,
+        score=score,
         allocation_pct=allocation_pct,
         thesis=thesis.strip(),
         reference_price=reference_price,

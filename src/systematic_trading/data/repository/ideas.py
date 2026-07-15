@@ -31,6 +31,7 @@ def submit_idea(
     strategy: str,
     ticker: str,
     side: IdeaSide,
+    score: float,
     allocation_pct: float,
     thesis: str,
     reference_price: float,
@@ -39,6 +40,8 @@ def submit_idea(
 ) -> str:
     """Append one pending trade idea; returns the generated idea_id.
 
+    ``score`` is the agent's 1-10 conviction score, recorded so the book can be
+    built by ranking ideas rather than by an absolute cut.
     ``allocation_pct`` is percent-of-portfolio (4.5 means 4.5%);
     ``reference_price`` is the price at submission time, recorded so idea
     quality can later be judged separately from execution quality.
@@ -51,6 +54,7 @@ def submit_idea(
             "idea_id": idea_id,
             "ticker": ticker,
             "side": side,
+            "score": Decimal(str(score)),
             "allocation_pct": Decimal(str(allocation_pct)),
             "thesis": thesis,
             "reference_price": Decimal(str(reference_price)),
@@ -93,3 +97,8 @@ def update_idea_status(
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={":s": status, ":t": ledger_trade_id},
     )
+
+
+if __name__ == "__main__":
+    df = load_ideas("trade-ideas")
+    print(df.head())
