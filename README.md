@@ -1,60 +1,79 @@
 # Systematic Trading
 
-Systematic trading system with agents embedded in the investment process.
+Systematic trading system with strategy-owned workflows and agents embedded in
+the investment process.
 
-**Lumibot is the infrastructure layer only** — backtesting plus paper/live execution
-through its native Alpaca broker. The strategies, agents, portfolio construction, and
-data enrichment are all our own code and live under `src/systematic_trading/`.
-
-## Stack
-
-- **Execution / backtest engine:** [Lumibot](https://lumibot.lumiwealth.com) (native Alpaca broker)
-- **Price feed:** Alpaca (live + backtest), via Lumibot
-- **Data enrichment:** Financial Modeling Prep (fundamentals / macro), called directly in strategy logic
-- **Env / packaging:** [uv](https://docs.astral.sh/uv/) + `pyproject.toml`, Python 3.13
+Lumibot is the execution infrastructure: backtesting plus paper/live trading
+through its native Alpaca broker. Screening, agent research, workflow
+orchestration, portfolio logic, and supplementary data are application code
+under `src/systematic_trading/`.
 
 ## Setup
 
 ```bash
-# 1. Install dependencies into a managed .venv
 uv sync
-
-# 2. Configure secrets
-cp .env.example .env    # then fill in Alpaca + FMP keys
+cp .env.example .env
 ```
 
-## Run
+Fill in the services used by the job or strategy you intend to run. Paper mode
+is the default; real-money trading requires an explicit `ALPACA_PAPER=false`.
+
+## Commands
+
+Run the offline test suite and quality checks:
 
 ```bash
-# Backtest the reference strategy (Yahoo daily data, no keys needed)
-uv run python scripts/backtest.py
-
-# Paper/live trade against Alpaca (paper by default; ALPACA_PAPER controls it)
-uv run python scripts/run_trader.py
-
-# Tests
 uv run pytest
+uv run ruff check src scripts tests
+uv run ruff format --check src scripts tests
 ```
 
-## Layout
+The generic runners accept one or more registered Lumibot strategies:
 
+```bash
+uv run backtest <strategy> --start 2024-01-01 --end 2024-12-31
+uv run live <strategy>
 ```
+
+The strategy registry is intentionally empty until the first complete strategy
+adapter is implemented. Never run `live` unless opening a broker connection is
+the explicit intent.
+
+Scheduled data-maintenance jobs remain directly runnable:
+
+```bash
+uv run python scripts/push_fundamentals.py
+uv run python scripts/push_daily_prices.py
+uv run python scripts/update_daily_prices.py
+uv run python -m systematic_trading.screener.fundamentals.build
+```
+
+## Architecture
+
+```text
 src/systematic_trading/
-  config.py        # env/secrets; alpaca_config() → Lumibot broker dict
-  strategies/      # Lumibot Strategy subclasses (same class backtest + live)
-  screeners/       # reusable stock screens consumed by strategies
-  agents/          # LLM / tool-calling decision layer (broker-agnostic)
-  portfolios/      # sizing, risk budgeting, signal → target weights
-  data/            # supplementary data adapters (FMP lives here)
-scripts/           # backtest.py, run_trader.py entry points
-tests/             # smoke tests
+  domain/            # typed trade ideas and fills
+  data/              # contracts, FMP adapter, S3/DynamoDB repositories
+  agents/tools/      # broker-agnostic tools shared by strategy agents
+  screener/          # reusable panel construction, metrics, and scoring
+  strategies/        # strategy-owned screening, workflows, agents, Lumibot adapter
+  backtest.py        # generic registered-strategy backtest runner
+  live.py            # generic registered-strategy live/paper runner
 ```
 
-## Data model (how it fits together)
+CSF Champions is organized as one strategy bubble:
 
-- **Live/paper:** Alpaca is both broker and price feed — Lumibot streams it
-  automatically. `self.get_last_price()` / `self.get_historical_prices()` just work.
-- **Backtest:** pick a Lumibot data source (Yahoo=daily/free, Alpaca=intraday,
-  `PandasDataBacktesting`=your own files).
-- **FMP** is *not* a Lumibot data source. It's enrichment (fundamentals, macro) you
-  call yourself via `systematic_trading.data.providers.fmp.FMPClient` alongside Alpaca prices.
+```text
+strategies/csf_champions/
+  strategy.py
+  screening.py
+  workflows/
+  agents/
+```
+
+The workflow layer is broker-agnostic. `strategy.py` will decide when workflows
+run and translate their results into Lumibot orders after its lifecycle and
+execution contract are specified.
+
+See `docs/architecture.md` for dependency rules and
+`docs/strategies/csf_champions.md` for the current workflow status.

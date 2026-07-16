@@ -1,4 +1,4 @@
-"""Parquet symbol-pruning helpers."""
+"""Universe exclusions and symbol-pruning behavior."""
 
 import pandas as pd
 

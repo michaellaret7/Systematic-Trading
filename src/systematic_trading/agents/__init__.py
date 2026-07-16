@@ -1,7 +1,5 @@
-"""Agentic decision layer.
+"""Broker-agnostic agent capabilities shared across strategies.
 
-Your LLM / tool-calling agents live here. They are plain Python — a strategy in
-``strategies/`` calls into an agent during ``on_trading_iteration`` to produce
-signals or sizing. Keep agents broker-agnostic so they run identically in backtest
-and live.
+Reusable tools live here. Strategy-specific agents, prompts, and sub-agents stay
+inside their owning strategy package so each strategy remains one cohesive unit.
 """

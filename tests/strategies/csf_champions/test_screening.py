@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from systematic_trading.screener.fundamentals.screeners import champions
+from systematic_trading.strategies.csf_champions import screening
 
 
 def make_panel() -> pd.DataFrame:
@@ -48,7 +48,7 @@ def make_panel() -> pd.DataFrame:
     frame["owner_earnings_yield_ttm"] = [0.06, 0.025, 0.06]
     frame["ev_to_ebitda_ttm"] = [15.0, 35.0, 15.0]
 
-    for column in champions.CONTEXT_COLUMNS:
+    for column in screening.CONTEXT_COLUMNS:
         if column not in frame:
             frame[column] = 1.0
 
@@ -57,9 +57,9 @@ def make_panel() -> pd.DataFrame:
 
 def test_champions_returns_full_universe_without_gate_flags(monkeypatch):
     panel = make_panel()
-    monkeypatch.setattr(champions, "load_panel", lambda columns: panel[columns].copy())
+    monkeypatch.setattr(screening, "load_panel", lambda columns: panel[columns].copy())
 
-    result = champions.screen(as_of="2026-06-01")
+    result = screening.screen(as_of="2026-06-01")
 
     assert result["symbol"].tolist() == ["CHEAP", "EXPENSIVE", "INCOMPLETE"]
     assert {
@@ -73,10 +73,10 @@ def test_champions_returns_full_universe_without_gate_flags(monkeypatch):
 
 def test_former_gate_only_metrics_do_not_affect_scores(monkeypatch):
     panel = make_panel()
-    monkeypatch.setattr(champions, "load_panel", lambda columns: panel[columns].copy())
-    baseline = champions.screen(as_of="2026-06-01").set_index("symbol")["score"]
+    monkeypatch.setattr(screening, "load_panel", lambda columns: panel[columns].copy())
+    baseline = screening.screen(as_of="2026-06-01").set_index("symbol")["score"]
 
     panel.loc[panel["symbol"] == "EXPENSIVE", "roic_floor_5y"] = -10.0
-    changed = champions.screen(as_of="2026-06-01").set_index("symbol")["score"]
+    changed = screening.screen(as_of="2026-06-01").set_index("symbol")["score"]
 
     pd.testing.assert_series_equal(changed, baseline)

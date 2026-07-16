@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 from agent_harness.decorator import Param, agent_tool
 
 from systematic_trading.data.repository import load_daily_prices, submit_idea
+from systematic_trading.domain.ideas import TradeIdea
 
 #     ================================
 # --> Helper funcs
@@ -52,9 +53,9 @@ def submit_trade_idea(
     allocation_pct: Annotated[
         float,
         Param(
-            description="Portfolio allocation as a percentage, e.g. 4.5 means 4.5%.",
-            min_val=0.1,
-            max_val=100.0,
+            description="Portfolio allocation as a percentage, from 0.5 (min) to 3.0 (max).",
+            min_val=0.5,
+            max_val=3.0,
         ),
     ],
     thesis: Annotated[
@@ -89,15 +90,17 @@ def submit_trade_idea(
         return f"error: no price data for ticker {symbol!r}; is the symbol correct?"
 
     idea_id = submit_idea(
-        strategy=_strategy,
-        ticker=symbol,
-        side=side,
-        score=score,
-        allocation_pct=allocation_pct,
-        thesis=thesis.strip(),
-        reference_price=reference_price,
-        model=_model,
-        created_at=datetime.now(timezone.utc),
+        TradeIdea(
+            strategy=_strategy,
+            ticker=symbol,
+            side=side,
+            score=score,
+            allocation_pct=allocation_pct,
+            thesis=thesis.strip(),
+            reference_price=reference_price,
+            model=_model,
+            created_at=datetime.now(timezone.utc),
+        )
     )
 
     return (

@@ -1,4 +1,4 @@
-"""Screen machinery for screener.
+"""Screen machinery for the shared fundamentals screener.
 
 Small synthetic panel with known dates and metrics; checks the point-in-time
 cross-section, staleness drop, scoring direction, weighted score groups, and

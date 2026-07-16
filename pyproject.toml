@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-# Generic runners — select strategies by registry name, e.g. `uv run live sp500_momentum`.
+# Generic runners select complete Lumibot strategies by registry name.
 live = "systematic_trading.live:main"
 backtest = "systematic_trading.backtest:main"
 

@@ -9,7 +9,6 @@ findable about executives on the public internet.
 from datetime import datetime
 
 from agent_harness.base_tools.deploy_subagent import SubAgentConfig
-from agent_harness.sub_agent import SubAgent
 
 CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
 
@@ -102,7 +101,7 @@ record was thin.
 </output_format>
 """
 
-MGMT_SUB_AGENT_CONFIG = SubAgentConfig(
+MANAGEMENT_SUBAGENT_CONFIG = SubAgentConfig(
     name="management_sub_agent",
     description=(
         "Researches the management team of the given company on the public web "
@@ -115,7 +114,3 @@ MGMT_SUB_AGENT_CONFIG = SubAgentConfig(
     provider="openrouter",
     model="deepseek/deepseek-v4-pro",
 )
-
-
-
-

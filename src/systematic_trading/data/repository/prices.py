@@ -10,6 +10,7 @@ import datetime as dt
 import pandas as pd
 
 from systematic_trading.config import s3_bucket
+from systematic_trading.data.contracts import validate_daily_prices
 
 DAILY_PRICES_KEY = "prices/daily_ohclv.parquet"
 
@@ -46,4 +47,6 @@ def load_daily_prices(
 
 def write_daily_prices(frame: pd.DataFrame) -> None:
     """Overwrite the daily OHLCV parquet on S3."""
+    validate_daily_prices(frame)
+
     frame.to_parquet(daily_prices_uri(), index=False)

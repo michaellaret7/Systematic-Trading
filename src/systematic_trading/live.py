@@ -5,8 +5,7 @@ share one broker connection and run in a single Trader until stopped with
 Ctrl+C. Strategy names come from ``systematic_trading.strategies.STRATEGIES``.
 
 Usage:
-    uv run live
-    uv run live sp500_momentum another_strategy
+    uv run live <registered-strategy>
 """
 
 from __future__ import annotations
@@ -20,8 +19,6 @@ from systematic_trading.config import alpaca_config, is_paper
 from systematic_trading.logging_setup import configure_logging
 from systematic_trading.strategies import STRATEGIES
 
-DEFAULT_STRATEGIES = ["sp500_momentum"]
-
 #     ================================
 # --> Helper funcs
 #     ================================
@@ -33,17 +30,12 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "strategies",
-        nargs="*",
+        nargs="+",
         choices=sorted(STRATEGIES),
-        help=f"registry name(s) of the strategies to run (default: {DEFAULT_STRATEGIES[0]})",
+        help="registry name(s) of the strategies to run",
     )
 
-    args = parser.parse_args()
-
-    # argparse can't combine nargs="*" defaults with choices, so fall back here.
-    args.strategies = args.strategies or DEFAULT_STRATEGIES
-
-    return args
+    return parser.parse_args()
 
 
 def main() -> None:

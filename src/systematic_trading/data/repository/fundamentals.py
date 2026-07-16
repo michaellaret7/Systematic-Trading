@@ -10,6 +10,11 @@ import pyarrow.parquet as pq
 import s3fs
 
 from systematic_trading.config import s3_bucket
+from systematic_trading.data.contracts import (
+    validate_fundamentals_panel,
+    validate_statement_frame,
+    validate_universe,
+)
 
 STATEMENTS = ("income", "balance", "cashflow", "key_metrics", "ratios")
 PERIODS = ("quarter", "annual")
@@ -67,6 +72,8 @@ ROW_GROUP_SIZE = 20_000
 
 def write_statement(frame: pd.DataFrame, statement: str, period: str) -> None:
     """Overwrite one raw FMP statement parquet on S3, row-grouped for pruned reads."""
+    validate_statement_frame(frame)
+
     frame.to_parquet(statement_uri(statement, period), index=False, row_group_size=ROW_GROUP_SIZE)
 
 
@@ -77,6 +84,8 @@ def load_panel(columns: list[str] | None = None) -> pd.DataFrame:
 
 def write_panel(panel: pd.DataFrame) -> None:
     """Overwrite the shared fundamentals panel on S3."""
+    validate_fundamentals_panel(panel)
+
     panel.to_parquet(panel_uri(), index=False)
 
 
@@ -101,4 +110,6 @@ def load_universe() -> list[str]:
 
 def write_universe(symbols: list[str]) -> None:
     """Overwrite the active-universe CSV on S3."""
+    validate_universe(symbols)
+
     pd.DataFrame({"symbol": sorted(symbols)}).to_csv(universe_uri(), index=False)

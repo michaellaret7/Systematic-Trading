@@ -5,7 +5,6 @@ and deploys the management / moat / risk sub-agents for the qualitative
 research, then synthesizes everything into a single buy verdict.
 """
 
-import time
 from datetime import datetime
 
 CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
@@ -158,8 +157,8 @@ a single conviction score from 1 to 10. Rules:
 
 Once you have your score, and before you return your final report, decide
 whether to queue the idea. **Score 6 or higher: call SubmitTradeIdea** with the
-side, your score, an allocation sized to the score (a 6 is a small starter
-position, a 9-10 is a top-conviction weight), and a thesis citing the specific
+side, your score, an allocation between 0.5% and 3% sized to the score (a 6 is
+a 0.5% starter, a 9-10 earns the full 3% cap), and a thesis citing the specific
 fundamentals that drove the call. **Score 5 or below: do not submit** — it is
 not yet ownable at this price. One idea per ticker.
 </methodology>

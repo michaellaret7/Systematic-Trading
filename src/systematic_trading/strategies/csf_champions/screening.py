@@ -1,4 +1,4 @@
-"""Rank durable, self-funding compounders on quality and valuation."""
+"""CSF Champions screening policy over the shared fundamentals panel."""
 
 import pandas as pd
 
@@ -102,6 +102,3 @@ def screen(
         score_group_weights=SCORE_GROUP_WEIGHTS,
         complete_score_groups=("value",),
     )
-
-
-

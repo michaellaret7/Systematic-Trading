@@ -21,8 +21,8 @@ from __future__ import annotations
 import datetime as dt
 
 import pandas as pd
-from push_daily_prices import YEARS_OF_HISTORY, fetch_symbols
 
+from systematic_trading.data.price_sync import YEARS_OF_HISTORY, fetch_symbols
 from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.data.repository import (
     daily_prices_uri,

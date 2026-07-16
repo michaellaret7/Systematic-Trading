@@ -119,9 +119,7 @@ def _add_group_scores(
         snapshot[score_column] = composite_score(snapshot, weights)
 
         if name in complete_groups:
-            snapshot[score_column] = snapshot[score_column].where(
-                snapshot[coverage_column] == 1.0
-            )
+            snapshot[score_column] = snapshot[score_column].where(snapshot[coverage_column] == 1.0)
 
     scores = pd.DataFrame(
         {name: snapshot[f"{name}_score"] for name in score_groups},

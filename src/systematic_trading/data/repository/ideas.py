@@ -9,35 +9,19 @@ Keyed like the ledger: ``strategy`` partition + timestamp-prefixed ``idea_id``
 sort key, so a query returns ideas in chronological order.
 """
 
-from datetime import datetime
 from decimal import Decimal
-from typing import Literal
 from uuid import uuid4
 
 import pandas as pd
 from boto3.dynamodb.conditions import Attr, Key
 
 from systematic_trading.data.repository.dynamo import get_table, query_all
+from systematic_trading.domain.ideas import IDEA_STATUSES, IdeaStatus, TradeIdea
 
 TABLE_NAME = "trade-ideas"
 
-IdeaSide = Literal["long", "short"]
-IdeaStatus = Literal["pending", "executed", "rejected"]
 
-STATUSES: tuple[IdeaStatus, ...] = ("pending", "executed", "rejected")
-
-
-def submit_idea(
-    strategy: str,
-    ticker: str,
-    side: IdeaSide,
-    score: float,
-    allocation_pct: float,
-    thesis: str,
-    reference_price: float,
-    model: str,
-    created_at: datetime,
-) -> str:
+def submit_idea(idea: TradeIdea) -> str:
     """Append one pending trade idea; returns the generated idea_id.
 
     ``score`` is the agent's 1-10 conviction score, recorded so the book can be
@@ -46,20 +30,20 @@ def submit_idea(
     ``reference_price`` is the price at submission time, recorded so idea
     quality can later be judged separately from execution quality.
     """
-    idea_id = f"{created_at.isoformat()}#{ticker}#{uuid4().hex[:8]}"
+    idea_id = f"{idea.created_at.isoformat()}#{idea.ticker}#{uuid4().hex[:8]}"
 
     get_table(TABLE_NAME).put_item(
         Item={
-            "strategy": strategy,
+            "strategy": idea.strategy,
             "idea_id": idea_id,
-            "ticker": ticker,
-            "side": side,
-            "score": Decimal(str(score)),
-            "allocation_pct": Decimal(str(allocation_pct)),
-            "thesis": thesis,
-            "reference_price": Decimal(str(reference_price)),
-            "created_at": created_at.isoformat(),
-            "model": model,
+            "ticker": idea.ticker,
+            "side": idea.side,
+            "score": Decimal(str(idea.score)),
+            "allocation_pct": Decimal(str(idea.allocation_pct)),
+            "thesis": idea.thesis,
+            "reference_price": Decimal(str(idea.reference_price)),
+            "created_at": idea.created_at.isoformat(),
+            "model": idea.model,
             "status": "pending",
             "ledger_trade_id": None,
         }
@@ -87,8 +71,9 @@ def update_idea_status(
     ledger_trade_id: str | None = None,
 ) -> None:
     """Move one idea through its lifecycle; link the ledger fill when executed."""
-    if status not in STATUSES:
-        raise ValueError(f"unknown status {status!r}; expected one of {STATUSES}")
+    
+    if status not in IDEA_STATUSES:
+        raise ValueError(f"unknown status {status!r}; expected one of {IDEA_STATUSES}")
 
     # 'status' is a DynamoDB reserved word, so the expression aliases it via #s.
     get_table(TABLE_NAME).update_item(
@@ -98,7 +83,3 @@ def update_idea_status(
         ExpressionAttributeValues={":s": status, ":t": ledger_trade_id},
     )
 
-
-if __name__ == "__main__":
-    df = load_ideas("trade-ideas")
-    print(df.head())

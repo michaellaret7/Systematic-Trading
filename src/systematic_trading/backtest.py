@@ -7,9 +7,8 @@ the first iteration. Outputs (stats CSV, trades, HTML tearsheet) land in the
 ``logs/`` directory.
 
 Usage:
-    uv run backtest
-    uv run backtest --start 2024-01-01 --end 2024-12-31 --budget 250000
-    uv run backtest sp500_momentum some_other_strategy
+    uv run backtest <registered-strategy>
+    uv run backtest <registered-strategy> --start 2024-01-01 --end 2024-12-31
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ from systematic_trading.strategies import STRATEGIES
 DEFAULT_START = "2018-01-01"
 DEFAULT_END = "2026-06-30"
 DEFAULT_BUDGET = 1_000_000
-DEFAULT_STRATEGIES = ["sp500_momentum"]
 
 #     ================================
 # --> Helper funcs
@@ -41,9 +39,9 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "strategies",
-        nargs="*",
+        nargs="+",
         choices=sorted(STRATEGIES),
-        help=f"registry name(s) of the strategies to backtest (default: {DEFAULT_STRATEGIES[0]})",
+        help="registry name(s) of the strategies to backtest",
     )
     parser.add_argument(
         "--start",
@@ -64,12 +62,7 @@ def parse_args() -> argparse.Namespace:
         help=f"starting cash in dollars (default: {DEFAULT_BUDGET})",
     )
 
-    args = parser.parse_args()
-
-    # argparse can't combine nargs="*" defaults with choices, so fall back here.
-    args.strategies = args.strategies or DEFAULT_STRATEGIES
-
-    return args
+    return parser.parse_args()
 
 
 def main() -> None:

@@ -4,16 +4,18 @@ These do NOT hit the network or place orders — they just prove the environment
 sound. Run with: uv run pytest
 """
 
-from __future__ import annotations
+from importlib.util import find_spec
+
+import pytest
 
 
-def test_lumibot_imports():
-    from lumibot.brokers import Alpaca  # noqa: F401
-    from lumibot.strategies import Strategy  # noqa: F401
-    from lumibot.traders import Trader  # noqa: F401
+def test_lumibot_is_installed() -> None:
+    """Confirm the dependency exists without initializing broker infrastructure."""
+    assert find_spec("lumibot") is not None
 
 
-def test_alpaca_config_shape(monkeypatch):
+def test_alpaca_config_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alpaca configuration preserves paper mode as the safe default."""
     monkeypatch.setenv("ALPACA_API_KEY", "test-key")
     monkeypatch.setenv("ALPACA_API_SECRET", "test-secret")
     monkeypatch.setenv("ALPACA_PAPER", "true")

@@ -1,12 +1,9 @@
-"""Financial Modeling Prep adapters.
+"""Financial Modeling Prep REST client.
 
-- ``live.FMPClient`` — stable-API REST client: historical prices at every FMP
-  increment plus fundamentals (income statement, balance sheet, cash flow, ratios).
-  Broker-agnostic; also feeds the backtesting source.
-- ``bt.FMPDataBacktesting`` — Lumibot backtesting data source serving FMP bars.
+Import the Lumibot adapter explicitly from ``fmp.backtesting`` so data-ingestion
+code does not initialize the trading framework.
 """
 
-from systematic_trading.data.providers.fmp.bt import FMPDataBacktesting
-from systematic_trading.data.providers.fmp.live import FMPClient
+from systematic_trading.data.providers.fmp.client import FMPClient
 
-__all__ = ["FMPClient", "FMPDataBacktesting"]
+__all__ = ["FMPClient"]

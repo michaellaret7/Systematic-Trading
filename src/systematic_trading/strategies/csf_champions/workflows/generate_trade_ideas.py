@@ -1,31 +1,30 @@
-"""Batch runner: analyze the top screened tickers with the ticker-analyst agent.
+"""Generate CSF Champions trade ideas from screened candidates.
 
 Screens the CSF Champions universe, takes the top names, and runs the
 ticker-analyst agent over them with bounded concurrency — `MAX_WORKERS`
 agents in flight at once, the next ticker starting the instant one finishes.
 
-Each agent persists its own verdict via `submit_trade_idea`; this runner is
+Each agent persists its own verdict via `submit_trade_idea`; this workflow is
 fire-and-forget, logging only per-ticker success/failure.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from dotenv import load_dotenv
-
 from agent_harness.sinks import LogSink
 
-from systematic_trading.logging_setup import configure_logging, get_logger
-from systematic_trading.screener.fundamentals.screeners.champions import screen
+from systematic_trading.logging_setup import get_logger
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.agent import (
     build_ticker_analyst,
 )
+from systematic_trading.strategies.csf_champions.screening import screen
 
-TOP_N = 200
-MAX_WORKERS = 3
+TOP_N = 20
+MAX_WORKERS = 5
 
 log = get_logger(__name__)
 
-def analyze_ticker(symbol: str) -> None:
+
+def analyze_candidate(symbol: str) -> None:
     """Run a fresh ticker-analyst agent over one ticker to its verdict."""
     agent = build_ticker_analyst()
 
@@ -35,9 +34,8 @@ def analyze_ticker(symbol: str) -> None:
     )
 
 
-def build_portfolio() -> None:
-    configure_logging()
-
+def generate_trade_ideas() -> None:
+    """Screen and analyze the highest-ranked CSF Champions candidates."""
     ranked = screen()
     symbols = ranked["symbol"].tolist()[:TOP_N]
 
@@ -47,7 +45,7 @@ def build_portfolio() -> None:
     failed = 0
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(analyze_ticker, symbol): symbol for symbol in symbols}
+        futures = {pool.submit(analyze_candidate, symbol): symbol for symbol in symbols}
 
         for future in as_completed(futures):
             symbol = futures[future]
@@ -63,8 +61,5 @@ def build_portfolio() -> None:
 
     log.info("Batch complete: %d succeeded, %d failed", done, failed)
 
-
 if __name__ == "__main__":
-    # The harness reads env but never loads .env itself, so load it before any run.
-    load_dotenv()
-    build_portfolio()
+    generate_trade_ideas()

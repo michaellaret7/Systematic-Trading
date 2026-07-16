@@ -10,13 +10,13 @@ Entry points (defined in `[project.scripts]`):
 - `uv run backtest <strategy> [...]` — backtest one or more registered strategies on Alpaca historical data. Flags: `--start`, `--end` (ISO dates), `--budget`. Outputs (stats CSV, trades, HTML tearsheet) land in `logs/`.
 - `uv run live <strategy> [...]` — paper/live trade on Alpaca. All named strategies share one broker connection in a single `Trader` until Ctrl+C. **Paper by default** — real money only when `ALPACA_PAPER=false`.
 
-Strategy names come from the `STRATEGIES` registry in `src/systematic_trading/strategies/__init__.py` (e.g. `uv run backtest sp500_momentum`).
+Strategy names come from the `STRATEGIES` registry in `src/systematic_trading/strategies/__init__.py`. The registry stays empty until a complete Lumibot strategy is ready to run.
 
 Other commands:
-- `uv run pytest` — smoke tests (`tests/test_smoke.py`); no network, no orders.
-- `uv run ruff check` / `uv run ruff format` — lint/format (line length 100).
+- `uv run pytest` — full offline test suite; no network and no orders.
+- `uv run ruff check src scripts tests` / `uv run ruff format src scripts tests` — lint/format (line length 100).
 
-`scripts/` holds older single-strategy entry points (`backtest_sp500_momentum.py`, `run_sp500_momentum.py`); the generic runners above are the preferred interface.
+`scripts/` holds fixed scheduled data-maintenance jobs. Backtests and live trading use the generic runners above.
 
 ## Documentation
 
@@ -43,13 +43,16 @@ Key pages (consult these directly — they cover most day-to-day work):
 src/systematic_trading/
   config.py          # env/secrets; alpaca_config() → Lumibot broker dict
   logging_setup.py   # two-channel logging (quiet Lumibot / concise strategy narrative)
-  backtest.py        # `uv run backtest` — generic runner over STRATEGIES
-  live.py            # `uv run live` — generic runner over STRATEGIES
-  strategies/        # Lumibot Strategy subclasses + STRATEGIES registry
-  agents/            # LLM / tool-calling decision layer (broker-agnostic)
-  data/              # supplementary data adapters (FMP lives here)
-scripts/             # legacy single-strategy entry points
-tests/               # smoke tests
+  backtest.py        # generic backtest runner over STRATEGIES
+  live.py            # generic paper/live runner over STRATEGIES
+  domain/            # typed records shared across application boundaries
+  data/              # contracts, providers, repositories, and price-sync logic
+  agents/tools/      # shared broker-agnostic agent tools
+  screener/          # reusable scoring and screening primitives
+  strategies/        # strategy-owned screening, workflows, agents, and adapters
+scripts/             # fixed scheduled data-maintenance jobs
+tests/               # tests grouped by architectural boundary
+docs/                # architecture, contracts, storage, and strategy documentation
 logs/                # backtest outputs (tearsheets, stats, trades) — git-ignored
 ```
 
@@ -58,30 +61,33 @@ logs/                # backtest outputs (tearsheets, stats, trades) — git-igno
 Each strategy subclasses `lumibot.strategies.Strategy`. **The same class runs in backtest, paper, and live** — only the broker/data-source wiring in the runner changes. Guard against anything that would break this symmetry (e.g. use `self.get_datetime()`, never `datetime.now()`; use `self.is_backtesting` to branch where cadence must differ).
 
 To add a strategy:
-1. Subclass `Strategy` in a new module under `strategies/`.
-2. Define `WARM_UP_TRADING_DAYS` on the class — the backtest runner preloads that much daily history so indicators are warm at the first iteration (e.g. `SP500Momentum` needs 140 for its 126-day momentum score).
-3. Register it in the `STRATEGIES` dict in `strategies/__init__.py` under the CLI name you want.
+1. Create a feature package under `strategies/` that keeps its screening, workflows, specialized agents, and Lumibot adapter together.
+2. Subclass `Strategy` in that package's `strategy.py`.
+3. Define `WARM_UP_TRADING_DAYS` on the class so the backtest runner can preload enough daily history for its indicators.
+4. Register the complete strategy in `strategies/__init__.py` under the CLI name you want.
+
+Strategy workflows are callable application functions, not command-line scripts. Keep them broker-agnostic and pass time explicitly when reproducibility matters.
 
 Tunables go in the class-level `parameters` dict (Lumibot convention), not module constants.
 
 ### Non-obvious Lumibot/Alpaca invariants (learned the hard way)
 
-- **Shorts need explicit sides.** Lumibot's backtesting broker treats a plain `"sell"` as close-only and cancels it once the position is flat. Short entries/exits must use `"sell_short"` / `"buy_to_cover"`; the live Alpaca broker maps them back to plain buy/sell for the API. See `SP500Momentum._rebalance_orders`.
+- **Shorts need explicit sides.** Lumibot's backtesting broker treats a plain `"sell"` as close-only and cancels it once the position is flat. Short entries/exits must use `"sell_short"` / `"buy_to_cover"`; the live Alpaca broker maps them back to plain buy/sell for the API.
 - **Alpaca can't flip a position through zero in one order.** A long↔short flip is two orders: close the existing position, then open the new one.
 - **Order sequencing matters for cash.** Submit sells (long exits, new shorts) before buys, and risk-reducing buys (`buy_to_cover`) before new-long buys; size buys against the cash the sells raise.
-- **Backtests step daily, live runs at minute cadence.** Minute-stepping a year of simulated time is impractical, so `sleeptime` is `"1D"` when `self.is_backtesting`, `"1M"` live. Intraday logic (like drift trims) therefore runs once per simulated day in backtests.
-- **`on_abrupt_closing` deliberately does NOT `sell_all()`** — the monthly book should survive restarts. Don't "fix" this.
+- **Cadence is strategy policy.** Set backtest and live cadence explicitly after the strategy lifecycle is defined, and document any intentional divergence.
+- **Restart behavior is strategy policy.** Never add `sell_all()` to `on_abrupt_closing` unless that strategy explicitly requires liquidation on shutdown.
 - **Windows console encoding.** `configure_logging()` forces UTF-8 on stdout/stderr because cp1252 chokes on Lumibot's Unicode progress bar and aborts backtests mid-run. Don't remove it.
 
 ### Data model
 
 - **Live/paper:** Alpaca is both broker and price feed — Lumibot streams it automatically. `self.get_last_price()` / `self.get_historical_prices()` just work.
 - **Backtest:** `AlpacaBacktesting` (same keys as live). Other Lumibot data sources (Yahoo, `PandasDataBacktesting`, ThetaData via the `thetadata` extra) are options when needed.
-- **FMP is NOT a Lumibot data source.** Financial Modeling Prep is enrichment (fundamentals, macro) called directly from strategy/agent logic via `systematic_trading.data.providers.fmp.FMPClient`, alongside Alpaca prices.
+- **FMP has two separate boundaries.** `FMPClient` provides supplementary data; `FMPDataBacktesting` is an optional Lumibot adapter built on `PandasData`. Import the adapter explicitly from `systematic_trading.data.providers.fmp.backtesting` so ordinary ingestion code does not initialize Lumibot.
 
 ### Agents
 
-`agents/` holds the LLM / tool-calling decision layer. Agents are plain Python — a strategy calls into one during `on_trading_iteration` to produce signals or sizing. Keep agents **broker-agnostic** so they run identically in backtest and live.
+Shared LLM tools live in `agents/tools/`. Strategy-specific agent orchestration stays inside that strategy's package so the feature remains a concentrated unit. Agents and workflows are plain Python and must stay **broker-agnostic** so a strategy can call them identically in backtest and live.
 
 ### Logging
 
@@ -100,7 +106,7 @@ All credential handling lives in `config.py` — **strategies and agents never r
 ## Safety rails (trading-specific)
 
 - **Never default to real money.** Anything that touches order submission must keep paper as the default path; `ALPACA_PAPER=false` is an explicit user decision, never something code or docs flip silently.
-- **Never run `uv run live` (or the `scripts/run_*` equivalents) yourself** unless the user explicitly asks — it opens a broker connection and can place orders. Backtests and `pytest` are safe to run freely.
+- **Never run `uv run live` yourself** unless the user explicitly asks — it opens a broker connection and can place orders. Backtests and `pytest` are safe to run freely.
 - When changing order logic, trace the cash/position accounting by hand (sells → available cash → buys) before trusting a backtest that "looks fine".
 
 ## Response Type

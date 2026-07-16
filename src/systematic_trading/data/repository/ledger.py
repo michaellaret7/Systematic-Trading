@@ -9,7 +9,6 @@ Strategies record fills from ``on_filled_order`` — live/paper only, never from
 backtests (guard with ``self.is_backtesting``).
 """
 
-from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -18,35 +17,29 @@ from boto3.dynamodb.conditions import Key
 
 from systematic_trading.config import is_paper
 from systematic_trading.data.repository.dynamo import get_table, query_all
+from systematic_trading.domain.trades import TradeFill
 
 TABLE_NAME = "trade-ledger"
 
 
-def record_fill(
-    strategy: str,
-    symbol: str,
-    side: str,
-    quantity: float,
-    price: float,
-    filled_at: datetime,
-) -> str:
+def record_fill(fill: TradeFill) -> str:
     """Append one fill to the ledger; returns the generated trade_id.
 
     ``filled_at`` should come from the strategy clock (``self.get_datetime()``).
     The paper/live flag is stamped automatically so paper fills can never be
     mistaken for real-money ones.
     """
-    trade_id = f"{filled_at.isoformat()}#{symbol}#{uuid4().hex[:8]}"
+    trade_id = f"{fill.filled_at.isoformat()}#{fill.symbol}#{uuid4().hex[:8]}"
 
     get_table(TABLE_NAME).put_item(
         Item={
-            "strategy": strategy,
+            "strategy": fill.strategy,
             "trade_id": trade_id,
-            "symbol": symbol,
-            "side": side,
-            "quantity": Decimal(str(quantity)),
-            "price": Decimal(str(price)),
-            "filled_at": filled_at.isoformat(),
+            "symbol": fill.symbol,
+            "side": fill.side,
+            "quantity": Decimal(str(fill.quantity)),
+            "price": Decimal(str(fill.price)),
+            "filled_at": fill.filled_at.isoformat(),
             "paper": is_paper(),
         }
     )
@@ -63,8 +56,3 @@ def load_trades(strategy: str) -> pd.DataFrame:
     items = query_all(get_table(TABLE_NAME), Key("strategy").eq(strategy))
 
     return pd.DataFrame(items)
-
-
-if __name__ == "__main__":
-    trades = load_trades("test")
-    print(trades)

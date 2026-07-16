@@ -14,7 +14,6 @@ covers risks to the business itself.
 from datetime import datetime
 
 from agent_harness.base_tools.deploy_subagent import SubAgentConfig
-from agent_harness.sub_agent import SubAgent
 
 CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
 
@@ -103,7 +102,7 @@ with a note on where the public record was thin.
 </output_format>
 """
 
-RISK_SUB_AGENT_CONFIG = SubAgentConfig(
+RISK_SUBAGENT_CONFIG = SubAgentConfig(
     name="risk_sub_agent",
     description=(
         "Sweeps the public record for material business risks to the given "
@@ -117,20 +116,3 @@ RISK_SUB_AGENT_CONFIG = SubAgentConfig(
     provider="openrouter",
     model="deepseek/deepseek-v4-pro",
 )
-
-
-if __name__ == "__main__":
-    # Standalone test run: the harness reads env but never loads .env itself,
-    # so the entry point loads it before the client is built.
-    from dotenv import load_dotenv
-
-    from agent_harness.sinks import LogSink
-
-    load_dotenv()
-
-    report = SubAgent.from_spec(RISK_SUB_AGENT_CONFIG).run(
-        "Scan for material business risks at AAPLE Inc (ticker: AAPL).",
-        sink=LogSink(RISK_SUB_AGENT_CONFIG.name),
-    )
-
-    print(report)

@@ -10,7 +10,6 @@ industry structure, competitors, and pricing power on the public internet.
 from datetime import datetime
 
 from agent_harness.base_tools.deploy_subagent import SubAgentConfig
-from agent_harness.sub_agent import SubAgent
 
 CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
 
@@ -127,7 +126,7 @@ where the public record was thin.
 </output_format>
 """
 
-MOAT_SUB_AGENT_CONFIG = SubAgentConfig(
+MOAT_SUBAGENT_CONFIG = SubAgentConfig(
     name="moat_sub_agent",
     description=(
         "Researches the competitive position of the given company on the public "
@@ -141,20 +140,3 @@ MOAT_SUB_AGENT_CONFIG = SubAgentConfig(
     provider="openrouter",
     model="deepseek/deepseek-v4-pro",
 )
-
-
-if __name__ == "__main__":
-    # Standalone test run: the harness reads env but never loads .env itself,
-    # so the entry point loads it before the client is built.
-    from dotenv import load_dotenv
-
-    from agent_harness.sinks import LogSink
-
-    load_dotenv()
-
-    report = SubAgent.from_spec(MOAT_SUB_AGENT_CONFIG).run(
-        "Analyze the competitive position and moat of Sunrun Inc (ticker: RUN).",
-        sink=LogSink(MOAT_SUB_AGENT_CONFIG.name),
-    )
-
-    print(report)
