@@ -97,6 +97,7 @@ def screen(
     return run_screen(
         panel,
         as_of=as_of,
+        excluded_sectors=("Financial Services",),
         sector_relative_columns=SECTOR_RELATIVE_COLUMNS,
         score_groups=SCORE_GROUPS,
         score_group_weights=SCORE_GROUP_WEIGHTS,

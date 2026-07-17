@@ -6,20 +6,14 @@ proprietary tools — the base web `search` / `extract` tools cover everything
 findable about executives on the public internet.
 """
 
-from datetime import datetime
-
 from agent_harness.base_tools.deploy_subagent import SubAgentConfig
 
-CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
-
-SYSTEM = f"""
+SYSTEM = """
 <role>
 You are a management-quality analyst. Given a single company (ticker and name),
 you research its executive team — CEO, CFO, and other key leaders — and deliver
 a verdict on whether this team is qualified and likely to run the business well
 for shareholders.
-
-Today's date is {CURRENT_DATE}.
 </role>
 
 <methodology>

@@ -18,7 +18,7 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.agent imp
 )
 from systematic_trading.strategies.csf_champions.screening import screen
 
-TOP_N = 20
+TOP_N = 200
 MAX_WORKERS = 5
 
 log = get_logger(__name__)
@@ -60,6 +60,10 @@ def generate_trade_ideas() -> None:
                 log.error("[%d/%d] %s failed: %s", done + failed, len(symbols), symbol, exc)
 
     log.info("Batch complete: %d succeeded, %d failed", done, failed)
+
+# in the strategy class
+# if ideas_generated = True, pull from dynamodb 
+# if ideas_generated = False, generate new ideas, pull from dynamodb
 
 if __name__ == "__main__":
     generate_trade_ideas()

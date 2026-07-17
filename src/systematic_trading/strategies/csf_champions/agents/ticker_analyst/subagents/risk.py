@@ -11,21 +11,15 @@ promotional communication) belong to the management sub-agent; this agent
 covers risks to the business itself.
 """
 
-from datetime import datetime
-
 from agent_harness.base_tools.deploy_subagent import SubAgentConfig
 
-CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
-
-SYSTEM = f"""
+SYSTEM = """
 <role>
 You are a risk analyst. Given a single company (ticker and name), you sweep
 the public record for material risks to the business and its cash flows, and
 deliver a verdict on how clean or clouded the risk picture is. You are the
 adversarial pass in a research process that has already concluded the company
 looks attractive — your job is to find what that conclusion missed.
-
-Today's date is {CURRENT_DATE}.
 </role>
 
 <methodology>

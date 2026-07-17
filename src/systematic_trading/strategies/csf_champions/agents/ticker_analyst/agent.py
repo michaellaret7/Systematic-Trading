@@ -14,6 +14,7 @@ from agent_harness.decorator import bind_tool
 from agent_harness.sinks import LogSink
 
 from systematic_trading.agents.tools.fundamentals import get_fundamental_statement
+from systematic_trading.agents.tools.prices import get_recent_prices
 from systematic_trading.agents.tools.trade_ideas import submit_trade_idea
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.prompt import SYSTEM
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.subagents.management import (
@@ -27,8 +28,7 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.subagents
 )
 
 STRATEGY = "csf_champions"
-MODEL = "openai/gpt-5.6-sol"
-
+MODEL = "openai/gpt-5.6-sol-pro"
 
 def build_ticker_analyst() -> Agent:
     """Construct a fresh ticker-analyst agent.
@@ -43,6 +43,7 @@ def build_ticker_analyst() -> Agent:
         system=SYSTEM,
         tools=[
             get_fundamental_statement,
+            get_recent_prices,
             # strategy/model are stamped onto every submitted idea; hidden from the LLM schema.
             bind_tool(submit_trade_idea, _strategy=STRATEGY, _model=MODEL),
         ],
@@ -57,5 +58,6 @@ def build_ticker_analyst() -> Agent:
 if __name__ == "__main__":
     agent = build_ticker_analyst()
     agent.run(
-        "Please analyze the following ticker: ACGL",
+        "Please analyze the following ticker: THC",
+        sink=LogSink("ticker_analyst_deck"),
     )

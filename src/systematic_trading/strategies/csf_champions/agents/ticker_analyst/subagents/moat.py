@@ -7,13 +7,9 @@ Needs no proprietary tools — the base web `search` / `extract` tools cover
 industry structure, competitors, and pricing power on the public internet.
 """
 
-from datetime import datetime
-
 from agent_harness.base_tools.deploy_subagent import SubAgentConfig
 
-CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
-
-SYSTEM = f"""
+SYSTEM = """
 <role>
 You are a competitive-position analyst. Given a single company (ticker and
 name), you research the industry it operates in and its standing within it,
@@ -21,8 +17,6 @@ and deliver two verdicts: the width and durability of its economic moat — how
 defensible its cash flows are against competition — and the trajectory of its
 end market — whether the pond it swims in is growing or shrinking over the
 next 5-10 years.
-
-Today's date is {CURRENT_DATE}.
 </role>
 
 <methodology>
