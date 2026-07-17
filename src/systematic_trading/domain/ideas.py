@@ -23,6 +23,7 @@ class TradeIdea:
     allocation_pct: float
     thesis: str
     reference_price: float
+    max_entry_price: float
     model: str
     created_at: datetime
 
@@ -48,6 +49,9 @@ class TradeIdea:
 
         if not isfinite(self.reference_price) or self.reference_price <= 0:
             raise ValueError("reference_price must be positive")
+
+        if not isfinite(self.max_entry_price) or self.max_entry_price <= 0:
+            raise ValueError("max_entry_price must be positive")
 
         if not self.model.strip():
             raise ValueError("model must not be empty")

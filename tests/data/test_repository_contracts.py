@@ -30,9 +30,10 @@ def trade_idea() -> TradeIdea:
         ticker="AAPL",
         side="long",
         score=8.5,
-        allocation_pct=4.0,
+        allocation_pct=2.5,
         thesis="Durable returns on capital.",
         reference_price=200.0,
+        max_entry_price=220.0,
         model="test-model",
         created_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
     )

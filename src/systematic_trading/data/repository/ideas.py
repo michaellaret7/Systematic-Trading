@@ -29,6 +29,9 @@ def submit_idea(idea: TradeIdea) -> str:
     ``allocation_pct`` is percent-of-portfolio (4.5 means 4.5%);
     ``reference_price`` is the price at submission time, recorded so idea
     quality can later be judged separately from execution quality.
+    ``max_entry_price`` is the validity ceiling: the highest entry price at
+    which the thesis still clears the return bar — the executor should not
+    fill a pending idea above it.
     """
     idea_id = f"{idea.created_at.isoformat()}#{idea.ticker}#{uuid4().hex[:8]}"
 
@@ -42,6 +45,7 @@ def submit_idea(idea: TradeIdea) -> str:
             "allocation_pct": Decimal(str(idea.allocation_pct)),
             "thesis": idea.thesis,
             "reference_price": Decimal(str(idea.reference_price)),
+            "max_entry_price": Decimal(str(idea.max_entry_price)),
             "created_at": idea.created_at.isoformat(),
             "model": idea.model,
             "status": "pending",
@@ -71,7 +75,7 @@ def update_idea_status(
     ledger_trade_id: str | None = None,
 ) -> None:
     """Move one idea through its lifecycle; link the ledger fill when executed."""
-    
+
     if status not in IDEA_STATUSES:
         raise ValueError(f"unknown status {status!r}; expected one of {IDEA_STATUSES}")
 
@@ -83,3 +87,10 @@ def update_idea_status(
         ExpressionAttributeValues={":s": status, ":t": ledger_trade_id},
     )
 
+
+if __name__ == "__main__":
+    ideas = load_ideas("csf_champions")
+
+    for idea in ideas.to_dict(orient="records"):
+        if idea["allocation_pct"] > 1:
+            print(idea["ticker"], idea["allocation_pct"], idea["score"])
