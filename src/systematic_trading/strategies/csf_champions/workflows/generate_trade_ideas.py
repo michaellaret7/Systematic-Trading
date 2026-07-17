@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 from agent_harness.sinks import LogSink
 
+from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.data.repository import count_ideas_since
 from systematic_trading.logging_setup import get_logger
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.agent import (
@@ -30,15 +31,42 @@ TOP_N = 10
 TARGET_IDEAS = 85
 MAX_WORKERS = 7
 
+# Universe listings for the symbol -> company-name map. The floor sits below the
+# universe's $2bn cutoff so names survive market-cap drift between panel builds.
+EXCHANGES = "NASDAQ,NYSE,AMEX"
+NAME_MARKET_CAP_FLOOR = 1_000_000_000
+
 log = get_logger(__name__)
 
 
-def analyze_candidate(symbol: str) -> None:
+def company_names(symbols: list[str]) -> dict[str, str]:
+    """Map each candidate symbol to its company name via one FMP screener call.
+
+    Tickers collide across exchanges (AERO, IAG, ...), so agents need the full
+    company name to research the right business. Symbols missing from the
+    screener response fall back to a ticker-only prompt.
+    """
+    listings = FMPClient().screener(
+        market_cap_more_than=NAME_MARKET_CAP_FLOOR,
+        exchange=EXCHANGES,
+    )
+    names = dict(zip(listings["symbol"], listings["companyName"]))
+
+    return {symbol: names[symbol] for symbol in symbols if symbol in names}
+
+
+def analyze_candidate(symbol: str, name: str | None) -> None:
     """Run a fresh ticker-analyst agent over one ticker to its verdict."""
     agent = build_ticker_analyst()
 
+    task = (
+        f"Analyze (ticker: {symbol}, company: {name}) and deliver your verdict."
+        if name
+        else f"Analyze (ticker: {symbol}) and deliver your verdict."
+    )
+
     agent.run(
-        f"Analyze (ticker: {symbol}) and deliver your verdict.",
+        task,
         sink=LogSink(f"ticker_analyst_{symbol}"),
     )
 
@@ -47,16 +75,22 @@ def generate_trade_ideas() -> None:
     """Screen and analyze the highest-ranked CSF Champions candidates."""
     ranked = screen()
     symbols = ranked["symbol"].tolist()[:TOP_N]
+    names = company_names(symbols)
     run_start = datetime.now(timezone.utc)
 
     log.info("Analyzing %d tickers with %d concurrent agents", len(symbols), MAX_WORKERS)
+
+    if len(names) < len(symbols):
+        log.warning("No company name for: %s", ", ".join(s for s in symbols if s not in names))
 
     done = 0
     failed = 0
     target_hit = False
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(analyze_candidate, symbol): symbol for symbol in symbols}
+        futures = {
+            pool.submit(analyze_candidate, symbol, names.get(symbol)): symbol for symbol in symbols
+        }
 
         for future in as_completed(futures):
             symbol = futures[future]
@@ -90,8 +124,9 @@ def generate_trade_ideas() -> None:
 
     log.info("Batch complete: %d succeeded, %d failed", done, failed)
 
+
 # in the strategy class
-# if ideas_generated = True, pull from dynamodb 
+# if ideas_generated = True, pull from dynamodb
 # if ideas_generated = False, generate new ideas, pull from dynamodb
 
 if __name__ == "__main__":

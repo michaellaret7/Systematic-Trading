@@ -23,6 +23,10 @@ from systematic_trading.strategies import STRATEGIES
 # --> Helper funcs
 #     ================================
 
+# Create runpod or Digital Ocean or Render pod using code and launch trading strategies from here. 
+# Create the infrastructure for this 
+# refer to launch trade ideas pod
+# Another Note: create resuseable cloud deployment of strategies class
 
 def parse_args() -> argparse.Namespace:
     """CLI: which registered strategies to run live."""

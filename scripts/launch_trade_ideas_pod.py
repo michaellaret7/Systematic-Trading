@@ -2,8 +2,9 @@
 
 Creates a 2 vCPU / 4 GB secure-cloud pod via the RunPod REST API. The pod
 clones the repo, installs dependencies with uv, runs ``generate_trade_ideas``,
-uploads the run log to ``s3://<S3_BUCKET>/logs/trade_ideas/``, and then
-deletes itself — on success or failure — so billing stops automatically.
+syncs the run log to ``s3://<S3_BUCKET>/logs/trade_ideas/<utc-stamp>.log``
+every five minutes (and once more at the end), and then deletes itself — on
+success or failure — so billing stops automatically.
 The launch call returns in seconds; the run continues in RunPod's cloud with
 no connection to this machine.
 
@@ -14,38 +15,23 @@ Usage:
     uv run python scripts/launch_trade_ideas_pod.py
 """
 
+# Build live pub sub logging infrastructure
+# Anyone can subscribe to the pubv output from the pod and log it
+
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 RUNPOD_API = "https://rest.runpod.io/v1"
 REPO_URL_TEMPLATE = "https://{auth}github.com/michaellaret7/Systematic-Trading.git"
 REPO_BRANCH = "dev"
 JOB_MODULE = "systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas"
 
-# Credentials the job needs on the pod. Required keys fail the launch locally;
-# optional keys are forwarded only when set.
-REQUIRED_ENV_KEYS = [
-    "ALPACA_API_KEY",
-    "ALPACA_API_SECRET",
-    "FMP_API_KEY",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "S3_BUCKET",
-    "OPENROUTER_API_KEY",
-    "RUNPOD_API_KEY",
-]
-OPTIONAL_ENV_KEYS = [
-    "ALPACA_PAPER",
-    "AWS_DEFAULT_REGION",
-    "LANGFUSE_SECRET_KEY",
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_BASE_URL",
-    "GITHUB_TOKEN",
-]
+ENV_FILE = Path(__file__).parents[1] / ".env"
 
 # Runs on the pod as its start command. Plain sequencing (no `set -e`): the
 # log upload and self-delete must run even when an earlier step fails.
@@ -59,9 +45,15 @@ git clone --branch {REPO_BRANCH} --single-branch "{REPO_URL_TEMPLATE.format(auth
 cd /root/repo
 uv sync --no-dev --no-cache
 
+STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
+upload_log() {{ uv run python -c "import os, boto3; boto3.client('s3').upload_file('/root/ideas.log', os.environ['S3_BUCKET'], 'logs/trade_ideas/$STAMP.log')"; }}
+touch /root/ideas.log
+
+( while true; do sleep 300; upload_log; done ) &
+
 uv run python -m {JOB_MODULE} 2>&1 | tee /root/ideas.log
 
-uv run python -c "import datetime, os, boto3; boto3.client('s3').upload_file('/root/ideas.log', os.environ['S3_BUCKET'], f'logs/trade_ideas/{{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H%M%SZ}}.log')"
+upload_log
 
 curl -s -X DELETE "{RUNPOD_API}/pods/$RUNPOD_POD_ID" -H "Authorization: Bearer $RUNPOD_API_KEY"
 """
@@ -83,14 +75,14 @@ def require(name: str) -> str:
 
 
 def pod_env() -> dict[str, str]:
-    """Collect the credentials to inject into the pod's environment."""
-    env = {key: require(key) for key in REQUIRED_ENV_KEYS}
+    """Forward the entire .env file so the pod sees the same config as local runs."""
+    if not ENV_FILE.exists():
+        raise RuntimeError(f"No .env file at {ENV_FILE}.")
 
-    for key in OPTIONAL_ENV_KEYS:
-        value = os.getenv(key)
+    env = {key: value for key, value in dotenv_values(ENV_FILE).items() if value}
 
-        if value:
-            env[key] = value
+    if "RUNPOD_API_KEY" not in env:
+        raise RuntimeError("RUNPOD_API_KEY missing from .env — the pod needs it to self-delete.")
 
     return env
 
@@ -128,7 +120,11 @@ def launch() -> None:
     pod = response.json()
 
     print(f"Pod {pod.get('id')} launched — safe to shut this machine down.")
-    print("Log lands in s3://" + os.environ["S3_BUCKET"] + "/logs/trade_ideas/ when the run ends.")
+    print(
+        "Log syncs to s3://"
+        + os.environ["S3_BUCKET"]
+        + "/logs/trade_ideas/ every 5 minutes and once more at the end."
+    )
 
 
 if __name__ == "__main__":
