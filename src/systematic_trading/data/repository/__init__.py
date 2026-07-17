@@ -34,6 +34,7 @@ from systematic_trading.data.repository.fundamentals import (
     write_universe,
 )
 from systematic_trading.data.repository.ideas import (
+    count_ideas_since,
     load_ideas,
     submit_idea,
     update_idea_status,
@@ -51,6 +52,7 @@ from systematic_trading.data.repository.prices import (
 __all__ = [
     "PERIODS",
     "STATEMENTS",
+    "count_ideas_since",
     "daily_prices_uri",
     "load_daily_prices",
     "load_ideas",

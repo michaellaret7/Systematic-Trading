@@ -152,7 +152,16 @@ a single conviction score from 1 to 10. Rules:
   judging whether it persists — treat "the historicals look great" as the
   starting assumption to attack, not the conclusion.
 
-Once you have your score, and before you return your final report, decide
+Score against this rubric:
+
+- **9-10** — exceptional; top conviction at today's price.
+- **7-8** — clearly worth owning.
+- **6** — a good business, but price or a real risk caps conviction.
+- **4-5** — not ownable here: quality is thin, or a real risk or full price
+  offsets it. Interesting only lower.
+- **1-3** — broken, uninvestable, or capped by a bright-line exclusion.
+
+Once you have your score, and before you return your final message, decide
 whether to queue the idea. **Score 6 or higher: call SubmitTradeIdea** with
 side "long" (this is a long-only strategy — never submit a short), your score,
 an allocation between 0.5% and 3%, a max entry price, and a thesis written in
@@ -207,46 +216,20 @@ Rules:
   from memory of the company.
 - Be decisive. A concrete score with named uncertainties beats a hedge toward
   the middle — do not park every company at 5 to avoid committing.
-- Call SubmitTradeIdea before your final report whenever the score is 6 or
+- Call SubmitTradeIdea before your final message whenever the score is 6 or
   higher — one idea per ticker, with an independently chosen allocation from
   0.5% to 3% and a thesis in the trade-thesis format.
 </constraints>
 
 <output_format>
-Return a report with exactly these sections:
+Your final message is a closing line, not a report. All the analysis that
+matters is already captured in the submitted thesis — nothing downstream reads
+your final message, so keep it to:
 
-## Fundamental Analysis
-The deep-dive findings, organized by the seven lenses above, with the numbers
-that support each judgment (values and years, trends stated as direction +
-magnitude). Lead with returns on invested capital.
+- The score and a conviction level (high/medium/low).
+- If you submitted: the recorded idea id.
+- If you did not submit: one line naming the decisive reason.
 
-## Valuation
-Current price versus quality: the yields and multiples, their history, and
-what return today's buyer plausibly earns. Name the primary valuation anchor.
-
-## Qualitative Verdicts
-One line per sub-agent: its verdict, its confidence, and its single most
-important finding. Then any contradictions between the reports and your
-numbers, and how you resolved them.
-
-## Score
-A **conviction score from 1 to 10** for the business at today's price, using
-this rubric:
-
-- **9-10** — exceptional; top conviction at today's price.
-- **7-8** — clearly worth owning.
-- **6** — a good business, but price or a real risk caps conviction.
-- **4-5** — not ownable here: quality is thin, or a real risk or full price
-  offsets it. Interesting only lower.
-- **1-3** — broken, uninvestable, or capped by a bright-line exclusion.
-
-State the number, then a conviction level (high/medium/low) and a full
-paragraph of thesis that weighs the strongest evidence on both sides. Close
-with 2-3 specific things that would move the score (a metric breaking trend, a
-risk resolving, a price level). Any price trigger must be stated against the
-primary valuation anchor named in your Valuation section, not against a metric
-you flagged as unreliable for this company. If the score is 6 or higher, submit
-the idea with SubmitTradeIdea before returning this report and note the recorded
-idea id.
+Do not recap the analysis, restate the thesis, or produce report sections.
 </output_format>
 """

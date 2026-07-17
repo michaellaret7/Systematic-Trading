@@ -9,6 +9,7 @@ Keyed like the ledger: ``strategy`` partition + timestamp-prefixed ``idea_id``
 sort key, so a query returns ideas in chronological order.
 """
 
+from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -54,6 +55,31 @@ def submit_idea(idea: TradeIdea) -> str:
     )
 
     return idea_id
+
+
+def count_ideas_since(strategy: str, since: datetime) -> int:
+    """Number of ideas submitted for one strategy at or after ``since``.
+
+    The sort key is timestamp-prefixed (ISO format), so a key-condition range
+    query with ``Select=COUNT`` counts server-side without fetching items.
+    """
+    key_condition = Key("strategy").eq(strategy) & Key("idea_id").gte(since.isoformat())
+    kwargs: dict = {"KeyConditionExpression": key_condition, "Select": "COUNT"}
+    table = get_table(TABLE_NAME)
+
+    total = 0
+
+    while True:
+        response = table.query(**kwargs)
+        total += response["Count"]
+
+        last_key = response.get("LastEvaluatedKey")
+        if last_key is None:
+            break
+
+        kwargs["ExclusiveStartKey"] = last_key
+
+    return total
 
 
 def load_ideas(strategy: str, status: IdeaStatus | None = None) -> pd.DataFrame:
