@@ -27,7 +27,7 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.agent imp
 )
 from systematic_trading.strategies.csf_champions.screening import screen
 
-TOP_N = 10
+TOP_N = 200
 TARGET_IDEAS = 85
 MAX_WORKERS = 7
 
