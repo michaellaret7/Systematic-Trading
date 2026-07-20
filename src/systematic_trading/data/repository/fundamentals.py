@@ -89,6 +89,16 @@ def write_panel(panel: pd.DataFrame) -> None:
     panel.to_parquet(panel_uri(), index=False)
 
 
+def load_sector_tags() -> dict[str, dict[str, str]]:
+    """Symbol -> {'sector', 'industry'} tags from the fundamentals panel."""
+    panel = load_panel(columns=["symbol", "sector", "industry"]).drop_duplicates("symbol")
+
+    return {
+        str(row["symbol"]): {"sector": str(row["sector"]), "industry": str(row["industry"])}
+        for row in panel.to_dict("records")
+    }
+
+
 def panel_symbols() -> list[str]:
     """Every symbol in the fundamentals panel, alphabetical."""
     panel = load_panel(columns=["symbol"])
