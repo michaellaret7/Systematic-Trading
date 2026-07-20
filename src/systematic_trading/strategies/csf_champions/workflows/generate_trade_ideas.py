@@ -20,15 +20,15 @@ from agent_harness.sinks import LogSink
 
 from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.data.repository import count_ideas_since
-from systematic_trading.logging_setup import get_logger
+from systematic_trading.logging_setup import configure_logging, get_logger
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.agent import (
     STRATEGY,
     build_ticker_analyst,
 )
 from systematic_trading.strategies.csf_champions.screening import screen
 
-TOP_N = 20
-TARGET_IDEAS = 8
+TOP_N = 200
+TARGET_IDEAS = 85
 MAX_WORKERS = 7
 
 # Universe listings for the symbol -> company-name map. The floor sits below the
@@ -130,4 +130,5 @@ def generate_trade_ideas() -> None:
 # if ideas_generated = False, generate new ideas, pull from dynamodb
 
 if __name__ == "__main__":
+    configure_logging()
     generate_trade_ideas()
