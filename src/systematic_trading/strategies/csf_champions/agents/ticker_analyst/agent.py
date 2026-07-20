@@ -11,7 +11,6 @@ runner must construct a fresh Agent per ticker rather than reusing this one.
 
 from agent_harness.agent import Agent
 from agent_harness.decorator import bind_tool
-from agent_harness.sinks import LogSink
 
 from systematic_trading.agents.tools.fundamentals import get_fundamental_statement
 from systematic_trading.agents.tools.prices import get_recent_prices
