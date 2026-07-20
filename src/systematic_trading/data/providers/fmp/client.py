@@ -236,6 +236,24 @@ class FMPClient:
 
         return _statement_frame(rows)
 
+    def earnings_calendar(
+        self,
+        start: dt.date | dt.datetime | str,
+        end: dt.date | dt.datetime | str,
+    ) -> pd.DataFrame:
+        """Earnings announcements dated within ``[start, end]``, one row per (symbol, date).
+
+        New statement rows land on FMP around each announcement, so consumers
+        holding stored fundamentals should re-pull any symbol that appears here
+        since their last refresh.
+        """
+        rows = self._get(
+            "earnings-calendar",
+            {"from": _to_date(start).isoformat(), "to": _to_date(end).isoformat()},
+        )
+
+        return _statement_frame(rows)
+
     def screener(
         self,
         market_cap_more_than: float | None = None,

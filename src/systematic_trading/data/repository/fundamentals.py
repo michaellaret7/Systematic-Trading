@@ -123,3 +123,7 @@ def write_universe(symbols: list[str]) -> None:
     validate_universe(symbols)
 
     pd.DataFrame({"symbol": sorted(symbols)}).to_csv(universe_uri(), index=False)
+
+
+if __name__ == "__main__":
+    print(load_statement(statement="income", period="quarter", symbol="AAPL"))
