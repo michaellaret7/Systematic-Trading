@@ -116,8 +116,4 @@ def update_idea_status(
 
 if __name__ == "__main__":
     ideas = load_ideas("csf_champions")
-    tickers = ideas["ticker"].tolist()
-    duplicates = ideas["ticker"][ideas["ticker"].duplicated(keep=False)].unique().tolist()
-
-    print(f"tickers ({len(tickers)}): {tickers}")
-    print(f"duplicates: {duplicates if duplicates else 'none'}")
+    print(ideas)
