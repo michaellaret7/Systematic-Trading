@@ -53,21 +53,29 @@ class Portfolio:
         """
         return sum(holding.weight_pct for holding in self.holdings.values())
 
+    def set_weight(self, ticker: str, weight_pct: float) -> None:
+        """Resize one holding; raises KeyError if the ticker is not held."""
+
+        if ticker not in self.holdings:
+            raise KeyError(f"{ticker} is not in the portfolio")
+
+        self.holdings[ticker].weight_pct = weight_pct
+
     def add(self, holding: Holding) -> None:
         """Add one holding; rejects duplicates so the book stays one-per-ticker."""
+
         if holding.ticker in self.holdings:
-            raise ValueError(f"{holding.ticker} is already in the portfolio")
+            raise KeyError(f"{holding.ticker} is already in the portfolio")
 
         self.holdings[holding.ticker] = holding
 
-    def set_weight(self, ticker: str, weight_pct: float) -> None:
-        """Resize one holding; raises KeyError if the ticker is not held."""
-        self.holdings[ticker].weight_pct = weight_pct
-
     def drop(self, ticker: str, reason: str) -> None:
         """Remove one holding, retaining it with the reason for the reject step."""
-        holding = self.holdings.pop(ticker)
 
+        if ticker not in self.holdings:
+            raise KeyError(f"{ticker} is not in the portfolio")
+
+        holding = self.holdings.pop(ticker)
         self.dropped[ticker] = (holding, reason)
 
     def summary(self) -> str:
