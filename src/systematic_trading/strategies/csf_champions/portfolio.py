@@ -3,8 +3,8 @@
 A working object, not broker state: the build_portfolio workflow seeds it from
 qualified trade ideas, the portfolio-constructor agent reshapes it through its
 bound tools, and the submission step reads the final holdings once
-construction ends. Dropped holdings are retained with their reasons so their
-source ideas can be marked rejected downstream.
+construction ends. Rejected bench ideas are retained with their reasons so
+they can be marked rejected downstream.
 """
 
 from dataclasses import dataclass, field
@@ -44,7 +44,7 @@ class Portfolio:
 
     def __init__(self) -> None:
         self.holdings: dict[str, Holding] = {}
-        self.dropped: dict[str, tuple[Holding, str]] = {}
+        self.rejected: dict[str, tuple[Holding, str]] = {}
 
     @property
     def total_weight(self) -> float:
@@ -71,18 +71,22 @@ class Portfolio:
 
         self.holdings[holding.ticker] = holding
 
-    def drop(self, ticker: str, reason: str) -> None:
-        """Remove one holding, retaining it with the reason for the reject step."""
+    def remove(self, ticker: str) -> Holding:
+        """Remove one holding without recording a drop, returning it (demotion path)."""
 
         if ticker not in self.holdings:
             raise KeyError(f"{ticker} is not in the portfolio")
 
-        holding = self.holdings.pop(ticker)
-        self.dropped[ticker] = (holding, reason)
+        return self.holdings.pop(ticker)
+
+    def reject(self, holding: Holding, reason: str) -> None:
+        """Record one bench idea as rejected, retaining it for the reject step."""
+
+        self.rejected[holding.ticker] = (holding, reason)
 
     def summary(self) -> str:
         """Readable snapshot of the draft book, heaviest weight first."""
-        if not self.holdings and not self.dropped:
+        if not self.holdings and not self.rejected:
             return "portfolio is empty"
 
         lines = [f"{len(self.holdings)} holdings:"]
@@ -96,8 +100,8 @@ class Portfolio:
 
         lines.append(f"total weight: {self.total_weight:.2f}%")
 
-        if self.dropped:
-            lines.append(f"dropped this run ({len(self.dropped)}):")
-            lines.extend(f"  {ticker}: {reason}" for ticker, (_, reason) in self.dropped.items())
+        if self.rejected:
+            lines.append(f"ideas rejected this run ({len(self.rejected)}):")
+            lines.extend(f"  {ticker}: {reason}" for ticker, (_, reason) in self.rejected.items())
 
         return "\n".join(lines)

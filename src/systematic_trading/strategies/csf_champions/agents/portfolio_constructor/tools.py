@@ -17,6 +17,7 @@ from agent_harness.decorator import Param, agent_tool
 from systematic_trading.agents.tools.correlations import MIN_OBSERVATIONS, daily_returns
 from systematic_trading.strategies.csf_champions.portfolio import (
     ALLOCATION_CAP_PCT,
+    ALLOCATION_FLOOR_PCT,
     ALLOCATION_TARGET_PCT,
     MIN_SCORE,
     Holding,
@@ -93,7 +94,9 @@ def _candidate_block(
         "ticker": symbol,
         "side": side,
         "weight_pct": weight_pct,
-        "annualized_vol_pct": round(float(usable[symbol].std()) * TRADING_DAYS_PER_YEAR**0.5 * 100, 1),
+        "annualized_vol_pct": round(
+            float(usable[symbol].std()) * TRADING_DAYS_PER_YEAR**0.5 * 100, 1
+        ),
         "portfolio_vol_now_pct": round(base_vol * 100, 1),
         "portfolio_vol_with_candidate_pct": round(variance**0.5 * 100, 1),
     }
@@ -117,7 +120,7 @@ def view_portfolio(_portfolio: Portfolio) -> str:
     """
     Show the current draft portfolio: every holding with its side, conviction
     score, weight, reference price, and max entry price, plus per-side weight
-    totals and any positions already dropped this run.
+    totals and any bench ideas already rejected this run.
     """
     return _portfolio.summary()
 
@@ -222,7 +225,7 @@ def add_position(
     Only tickers on the candidate bench can be added — there is no way to
     introduce a name without an underlying trade idea. Promotion removes the
     idea from the bench. Returns an "error: ..." string if the ticker is not
-    on the bench (never an idea, already promoted, or dropped this run), or
+    on the bench (never an idea, already promoted, or rejected this run), or
     if the addition would push total allocation past the cap.
     """
     symbol = ticker.strip().upper()
@@ -279,46 +282,118 @@ def set_position_weight(
     return f"{symbol} weight set to {weight_pct}%"
 
 
-@agent_tool(name="DropPosition")
-def drop_position(
-    ticker: Annotated[str, Param(description="Ticker of a holding already in the portfolio.")],
+@agent_tool(name="RejectIdea")
+def reject_idea(
+    ticker: Annotated[str, Param(description="Ticker of a candidate idea on the bench.")],
     reason: Annotated[
         str,
         Param(
             description=(
-                "The specific reason the position is being removed — recorded so the "
-                "underlying trade idea can be rejected downstream."
+                "Why the thesis is broken — recorded so the underlying trade idea is "
+                "marked rejected downstream and never resurfaces."
             )
         ),
     ],
+    _bench: dict[str, Holding],
     _portfolio: Portfolio,
 ) -> str:
     """
-    Remove one holding from the draft portfolio. Only positions scoring below
-    the conviction cut can be dropped — seeded high-conviction names are
-    protected. The drop is permanent for this run — there is no way to re-add
-    a ticker — so drop only with a clear reason. Returns an "error: ..."
-    string if the ticker is not in the portfolio or is protected.
+    Permanently reject one bench idea whose thesis is clearly broken. The idea
+    leaves the bench for good and is marked rejected downstream, so it will
+    not return in future runs. This is a high bar: reject only ideas flawed on
+    their merits, never names that merely don't fit the current book — those
+    stay on the bench. Holdings cannot be rejected directly; demote a promoted
+    name first if its idea turns out to be broken. Returns an "error: ..."
+    string if the ticker is not on the bench or the reason is empty.
     """
     symbol = ticker.strip().upper()
 
-    if symbol not in _portfolio.holdings:
-        return f"error: {symbol!r} is not in the portfolio"
+    if symbol in _portfolio.holdings:
+        return f"error: {symbol} is a holding — demote it to the bench before rejecting its idea"
+
+    holding = _bench.get(symbol)
+
+    if holding is None:
+        return f"error: {symbol!r} is not on the candidate bench"
 
     if not reason.strip():
         return "error: reason must not be empty"
 
-    score = _portfolio.holdings[symbol].score
+    _bench.pop(symbol)
 
-    if score >= MIN_SCORE:
+    _portfolio.reject(holding, reason.strip())
+
+    return f"{symbol} rejected and removed from the bench"
+
+
+@agent_tool(name="DemoteToBench")
+def demote_to_bench(
+    ticker: Annotated[
+        str, Param(description="Ticker of a below-cut holding you promoted from the bench.")
+    ],
+    _bench: dict[str, Holding],
+    _portfolio: Portfolio,
+) -> str:
+    """
+    Reverse a promotion: remove one below-cut holding from the draft portfolio
+    and return it to the candidate bench, where it stays available to
+    re-promote later. Nothing is recorded against the idea — use this when a
+    name is fine but does not fit the current mix, and RejectIdea (a bench
+    action) when the idea itself is broken. Names at or above the conviction cut are
+    seeded core holdings and cannot be demoted. Returns an "error: ..." string
+    if the ticker is not in the portfolio or is protected.
+    """
+    symbol = ticker.strip().upper()
+
+    holding = _portfolio.holdings.get(symbol)
+
+    if holding is None:
+        return f"error: {symbol!r} is not in the portfolio"
+
+    if holding.score >= MIN_SCORE:
         return (
-            f"error: {symbol} scored {score:.1f} — names at or above the {MIN_SCORE:.0f} "
-            "conviction cut are core holdings and cannot be dropped"
+            f"error: {symbol} scored {holding.score:.1f} — names at or above the {MIN_SCORE:.0f} "
+            "conviction cut are core holdings and cannot be demoted"
         )
 
-    _portfolio.drop(symbol, reason.strip())
+    _portfolio.remove(symbol)
 
-    return f"{symbol} dropped from the portfolio"
+    _bench[symbol] = holding
+
+    return f"{symbol} returned to the bench; total allocation is now {_portfolio.total_weight:.2f}%"
+
+
+@agent_tool(name="SubmitPortfolio")
+def submit_portfolio(_portfolio: Portfolio) -> str:
+    """
+    Final gate for the draft book: validates it against the allocation policy
+    and accepts it if it passes. Call it when you believe the book is done.
+    An "error: ..." result lists every violation to fix before resubmitting —
+    construction is not finished until this tool returns an acceptance.
+    """
+    violations: list[str] = []
+
+    if not _portfolio.holdings:
+        violations.append("the portfolio is empty")
+
+    total = _portfolio.total_weight
+
+    if total < ALLOCATION_FLOOR_PCT:
+        violations.append(
+            f"total allocation {total:.2f}% is below the {ALLOCATION_FLOOR_PCT:.0f}% floor"
+        )
+
+    if total > ALLOCATION_CAP_PCT:
+        violations.append(
+            f"total allocation {total:.2f}% is above the {ALLOCATION_CAP_PCT:.0f}% cap"
+        )
+
+    if violations:
+        return "error: " + "; ".join(violations)
+
+    return (
+        f"portfolio accepted: {len(_portfolio.holdings)} holdings at {total:.2f}% total allocation"
+    )
 
 
 @agent_tool(name="GetPortfolioRisk", safe_parallel=True)

@@ -19,10 +19,12 @@ from systematic_trading.agents.tools.correlations import get_price_correlations
 from systematic_trading.strategies.csf_champions.agents.portfolio_constructor.prompt import SYSTEM
 from systematic_trading.strategies.csf_champions.agents.portfolio_constructor.tools import (
     add_position,
-    drop_position,
+    demote_to_bench,
     get_idea_thesis,
     get_portfolio_risk,
+    reject_idea,
     set_position_weight,
+    submit_portfolio,
     view_candidate_ideas,
     view_portfolio,
     view_sector_exposure,
@@ -31,7 +33,7 @@ from systematic_trading.strategies.csf_champions.portfolio import MIN_SCORE, Hol
 from systematic_trading.data.repository import load_ideas, load_sector_tags
 
 STRATEGY = "csf_champions"
-MODEL = "openai/gpt-5.6-sol"
+MODEL = "openai/gpt-5.6-sol-pro"
 
 
 def seed_portfolio(portfolio: Portfolio, bench: dict[str, Holding]) -> tuple[int, int]:
@@ -41,7 +43,7 @@ def seed_portfolio(portfolio: Portfolio, bench: dict[str, Holding]) -> tuple[int
     timestamp-prefixed, so lexicographic order is chronological). Returns the
     number of seeded holdings and bench candidates.
     """
-    
+
     ideas = load_ideas(STRATEGY, status="pending")
 
     if ideas.empty:
@@ -93,7 +95,9 @@ portfolio_constructor = Agent(
         bind_tool(get_idea_thesis, _bench=bench, _portfolio=portfolio),
         bind_tool(add_position, _bench=bench, _portfolio=portfolio),
         bind_tool(set_position_weight, _portfolio=portfolio),
-        bind_tool(drop_position, _portfolio=portfolio),
+        bind_tool(reject_idea, _bench=bench, _portfolio=portfolio),
+        bind_tool(demote_to_bench, _bench=bench, _portfolio=portfolio),
+        bind_tool(submit_portfolio, _portfolio=portfolio),
         get_price_correlations,
     ],
 )
