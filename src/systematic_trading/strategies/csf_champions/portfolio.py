@@ -15,10 +15,12 @@ from systematic_trading.domain.ideas import IdeaSide
 # protected from agent drops; ideas below it go to the candidate bench.
 MIN_SCORE = 7.0
 
-# Allocation policy: the book targets ~60% of the account; additions that would
-# push the total past the hard cap are rejected at the tool boundary.
-ALLOCATION_TARGET_PCT = 60.0
-ALLOCATION_CAP_PCT = 65.0
+# Allocation policy: the book must finish between the floor and the cap; adds
+# that would push the total past the cap are rejected at the tool boundary,
+# and the floor is enforced by the constructor prompt.
+ALLOCATION_FLOOR_PCT = 56.0
+ALLOCATION_TARGET_PCT = 64.0
+ALLOCATION_CAP_PCT = 60.0
 
 
 @dataclass(slots=True)

@@ -13,7 +13,7 @@ resolution-markers = [
 [[package]]
 name = "agent-harness"
 version = "0.1.0"
-source = { git = "https://github.com/michaellaret7/Agent-Harness?subdirectory=packages%2Fagent_harness#b2587356f293787115487289eeeff809944ceb42" }
+source = { git = "https://github.com/michaellaret7/Agent-Harness?subdirectory=packages%2Fagent_harness#713c8920da7639b5bd90a0a2361f7b3f90954f0a" }
 dependencies = [
     { name = "httpx" },
     { name = "langfuse" },
