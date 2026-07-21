@@ -16,6 +16,7 @@ Strategies write from live/paper runs only, never from backtests (guard with
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 import pandas as pd
@@ -26,6 +27,57 @@ from systematic_trading.data.repository.dynamo import get_table, query_all
 from systematic_trading.domain.trades import TradeOrder
 
 TABLE_NAME = "trade-ledger"
+
+
+#     ================================
+# --> Helper funcs
+#     ================================
+
+
+def _load_order(table: Any, strategy: str, trade_id: str) -> dict:
+    """Fetch one ledger item, failing fast if the row does not exist."""
+    item = table.get_item(Key={"strategy": strategy, "trade_id": trade_id}).get("Item")
+
+    if item is None:
+        raise KeyError(f"no ledger order {trade_id!r} for strategy {strategy!r}")
+
+    return item
+
+
+def _write_fill_state(
+    table: Any,
+    strategy: str,
+    trade_id: str,
+    item: dict,
+    filled_quantity: int,
+    filled_cost: Decimal,
+    completion_price: Decimal,
+    filled_at: datetime,
+) -> str | None:
+    """Persist fill state; close the row and return its idea_id at target.
+
+    ``completion_price`` and ``filled_at`` are only written when
+    ``filled_quantity`` reaches the row's target.
+    """
+    updates: dict = {
+        ":q": filled_quantity,
+        ":c": filled_cost,
+    }
+    expression = "SET filled_quantity = :q, filled_cost = :c"
+    completed = filled_quantity >= int(item["target_quantity"])
+
+    if completed:
+        expression += ", filled_price = :p, filled_at = :t"
+        updates[":p"] = completion_price
+        updates[":t"] = filled_at.isoformat()
+
+    table.update_item(
+        Key={"strategy": strategy, "trade_id": trade_id},
+        UpdateExpression=expression,
+        ExpressionAttributeValues=updates,
+    )
+
+    return str(item["idea_id"]) if completed else None
 
 
 def record_order(order: TradeOrder) -> str:
@@ -77,33 +129,55 @@ def apply_fill(
     can move the idea to ``filled``), otherwise ``None``.
     """
     table = get_table(TABLE_NAME)
-    item = table.get_item(Key={"strategy": strategy, "trade_id": trade_id}).get("Item")
-
-    if item is None:
-        raise KeyError(f"no ledger order {trade_id!r} for strategy {strategy!r}")
+    item = _load_order(table, strategy, trade_id)
 
     filled_quantity = int(item["filled_quantity"]) + quantity
     filled_cost = item["filled_cost"] + Decimal(str(price)) * quantity
 
-    updates: dict = {
-        ":q": filled_quantity,
-        ":c": filled_cost,
-    }
-    expression = "SET filled_quantity = :q, filled_cost = :c"
-    completed = filled_quantity >= int(item["target_quantity"])
-
-    if completed:
-        expression += ", filled_price = :p, filled_at = :t"
-        updates[":p"] = filled_cost / filled_quantity
-        updates[":t"] = filled_at.isoformat()
-
-    table.update_item(
-        Key={"strategy": strategy, "trade_id": trade_id},
-        UpdateExpression=expression,
-        ExpressionAttributeValues=updates,
+    return _write_fill_state(
+        table,
+        strategy,
+        trade_id,
+        item,
+        filled_quantity,
+        filled_cost,
+        completion_price=filled_cost / filled_quantity,
+        filled_at=filled_at,
     )
 
-    return str(item["idea_id"]) if completed else None
+
+def reconcile_fill(
+    strategy: str,
+    trade_id: str,
+    filled_quantity: int,
+    avg_price: float,
+    filled_at: datetime,
+) -> str | None:
+    """Overwrite one order's fill state with broker truth.
+
+    The daily sweep uses this to heal fills the event hooks missed (Lumibot
+    silently drops trade events during a session's first iteration). Unlike
+    ``apply_fill`` this sets absolute values — quantity from the broker
+    position, cost from its average entry price — so it is idempotent.
+
+    Returns the order's ``idea_id`` when the reconciled quantity completes it,
+    otherwise ``None``.
+    """
+    table = get_table(TABLE_NAME)
+    item = _load_order(table, strategy, trade_id)
+
+    avg = Decimal(str(avg_price))
+
+    return _write_fill_state(
+        table,
+        strategy,
+        trade_id,
+        item,
+        filled_quantity,
+        filled_cost=avg * filled_quantity,
+        completion_price=avg,
+        filled_at=filled_at,
+    )
 
 
 def load_open_orders(strategy: str) -> pd.DataFrame:

@@ -44,6 +44,7 @@ from systematic_trading.data.repository.ledger import (
     apply_fill,
     load_open_orders,
     load_trades,
+    reconcile_fill,
     record_order,
 )
 from systematic_trading.data.repository.prices import (
@@ -68,6 +69,7 @@ __all__ = [
     "load_universe",
     "panel_symbols",
     "panel_uri",
+    "reconcile_fill",
     "record_order",
     "statement_columns",
     "statement_uri",

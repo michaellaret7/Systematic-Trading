@@ -21,7 +21,7 @@ policy.
 ## DynamoDB records
 
 `systematic_trading.domain.ideas.TradeIdea` and
-`systematic_trading.domain.trades.TradeFill` are the typed application records.
+`systematic_trading.domain.trades.TradeOrder` are the typed application records.
 Repositories accept these records and exclusively own:
 
 - UUID and sort-key generation.

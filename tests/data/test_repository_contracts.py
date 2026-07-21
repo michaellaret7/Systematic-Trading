@@ -158,6 +158,67 @@ def test_apply_fill_completes_order_with_weighted_average(
     assert values[":t"] == "2026-07-16T00:00:00+00:00"
 
 
+def test_reconcile_fill_overwrites_with_broker_truth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reconciliation sets absolute quantity and cost from the broker position."""
+    table = FakeTable(
+        item={
+            "strategy": "csf_champions",
+            "trade_id": "2026-07-15T00:00:00+00:00#AAPL#aaaa1111",
+            "idea_id": "2026-07-15T00:00:00+00:00#AAPL#61e26b27",
+            "target_quantity": Decimal("40"),
+            "filled_quantity": Decimal("0"),
+            "filled_cost": Decimal("0"),
+        }
+    )
+    monkeypatch.setattr(ledger, "get_table", lambda name: table)
+
+    completed_idea = ledger.reconcile_fill(
+        "csf_champions",
+        "2026-07-15T00:00:00+00:00#AAPL#aaaa1111",
+        filled_quantity=30,
+        avg_price=10.0,
+        filled_at=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+
+    assert completed_idea is None
+    assert table.update_kwargs is not None
+    values = table.update_kwargs["ExpressionAttributeValues"]
+    assert values[":q"] == 30
+    assert values[":c"] == Decimal("300")
+    assert ":t" not in values
+
+
+def test_reconcile_fill_completes_row_at_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A position at or past target closes the row and returns the idea to flip."""
+    table = FakeTable(
+        item={
+            "strategy": "csf_champions",
+            "trade_id": "2026-07-15T00:00:00+00:00#AAPL#aaaa1111",
+            "idea_id": "2026-07-15T00:00:00+00:00#AAPL#61e26b27",
+            "target_quantity": Decimal("40"),
+            "filled_quantity": Decimal("0"),
+            "filled_cost": Decimal("0"),
+        }
+    )
+    monkeypatch.setattr(ledger, "get_table", lambda name: table)
+
+    completed_idea = ledger.reconcile_fill(
+        "csf_champions",
+        "2026-07-15T00:00:00+00:00#AAPL#aaaa1111",
+        filled_quantity=40,
+        avg_price=10.125,
+        filled_at=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+
+    assert completed_idea == "2026-07-15T00:00:00+00:00#AAPL#61e26b27"
+    assert table.update_kwargs is not None
+    values = table.update_kwargs["ExpressionAttributeValues"]
+    assert values[":q"] == 40
+    assert values[":c"] == Decimal("405.000")
+    assert values[":p"] == Decimal("10.125")
+    assert values[":t"] == "2026-07-16T00:00:00+00:00"
+
+
 def test_apply_fill_rejects_unknown_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fill for a row that does not exist fails fast instead of writing."""
     monkeypatch.setattr(ledger, "get_table", lambda name: FakeTable())

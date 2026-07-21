@@ -39,12 +39,7 @@ class CsfChampions(Strategy):
     WARM_UP_TRADING_DAYS = 0
 
     parameters = {
-        # True -> run the (expensive) idea-generation agent before building
-        # the book. False -> use the ideas already in DynamoDB.
         "generate_ideas": False,
-        # True -> build the draft portfolio and submit entry orders at
-        # startup. False -> the book already lives at the broker; go straight
-        # to the daily loop.
         "build_portfolio": True,
     }
 

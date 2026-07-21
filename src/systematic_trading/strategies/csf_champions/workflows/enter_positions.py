@@ -173,6 +173,8 @@ def enter_positions(strategy: Strategy, portfolio: Portfolio) -> None:
     account_value = float(strategy.portfolio_value)
     submitted = 0
 
+    # This is where the orders are submitted to the broker from
+    # They are pulled from the Portfolio() object populated by the agent
     for holding in portfolio.holdings.values():
         if holding.side != "long":
             log.warning(

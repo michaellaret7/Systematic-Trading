@@ -78,6 +78,9 @@ Tunables go in the class-level `parameters` dict (Lumibot convention), not modul
 - **Cadence is strategy policy.** Set backtest and live cadence explicitly after the strategy lifecycle is defined, and document any intentional divergence.
 - **Restart behavior is strategy policy.** Never add `sell_all()` to `on_abrupt_closing` unless that strategy explicitly requires liquidation on shutdown.
 - **Windows console encoding.** `configure_logging()` forces UTF-8 on stdout/stderr because cp1252 chokes on Lumibot's Unicode progress bar and aborts backtests mid-run. Don't remove it.
+- **Lumibot drops trade events during the first iteration.** `strategy_executor.process_event` silently discards fill events while `_first_iteration` is true — fills on orders submitted at startup never reach `on_filled_order`. Any ledger built on fill hooks must be able to reconcile from broker positions (see `fill_open_orders`); never trust event capture alone.
+- **Alpaca's order-list endpoint lags fresh submissions by seconds.** `get_orders(broker_refresh=True)` right after submitting misses the new orders (this once caused 39 duplicate buys). Use local tracking (`broker_refresh=False`) to check for working orders in-session.
+- **Alpaca quotes report "no data" as 0.0, not None.** A zero bid/ask must be treated as missing or it propagates into $0 limit prices.
 
 ### Data model
 
