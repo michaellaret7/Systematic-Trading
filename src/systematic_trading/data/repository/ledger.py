@@ -130,3 +130,8 @@ def load_trades(strategy: str) -> pd.DataFrame:
     items = query_all(get_table(TABLE_NAME), Key("strategy").eq(strategy))
 
     return pd.DataFrame(items)
+
+
+if __name__ == "__main__":
+    trades = load_trades("csf_champions")
+    print(trades)

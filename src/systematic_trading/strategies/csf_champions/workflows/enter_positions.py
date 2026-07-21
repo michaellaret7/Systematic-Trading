@@ -44,9 +44,17 @@ def entry_base_price(strategy: Strategy, ticker: str) -> float | None:
 
     The ask is what a buy must cross to fill immediately; the last trade price
     is the fallback when the quote is missing or implausibly far above it.
+    Alpaca reports "no quote" as 0.0 rather than None, so any non-positive
+    price is treated as missing.
     """
     ask = strategy.get_quote(ticker).ask
     last_price = strategy.get_last_price(ticker)
+
+    if ask is not None and float(ask) <= 0:
+        ask = None
+
+    if last_price is not None and float(last_price) <= 0:
+        last_price = None
 
     if ask is None:
         return float(last_price) if last_price is not None else None
@@ -84,6 +92,15 @@ def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> 
         return False
 
     limit_price = entry_limit_price(base_price, holding.max_entry_price)
+
+    # A non-positive limit can only come from bad data; never size against it.
+    if limit_price <= 0:
+        log.warning(
+            "%s: computed limit price $%.2f is not positive — skipping entry",
+            holding.ticker,
+            limit_price,
+        )
+        return False
 
     if base_price > holding.max_entry_price:
         log.warning(
