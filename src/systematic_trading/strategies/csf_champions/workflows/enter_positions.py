@@ -64,11 +64,11 @@ def entry_base_price(strategy: Strategy, ticker: str) -> float | None:
     return float(ask)
 
 
-def entry_limit_price(base_price: float, holding: Holding) -> float:
+def entry_limit_price(base_price: float, max_entry_price: float) -> float:
     """Marketable limit for one entry, never above the analyst's max entry price."""
     marketable = base_price * (1 + LIMIT_BUFFER_PCT / 100)
 
-    return round(min(marketable, holding.max_entry_price), 2)
+    return round(min(marketable, max_entry_price), 2)
 
 
 def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> bool:
@@ -83,7 +83,7 @@ def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> 
         log.warning("%s: no price available — skipping entry", holding.ticker)
         return False
 
-    limit_price = entry_limit_price(base_price, holding)
+    limit_price = entry_limit_price(base_price, holding.max_entry_price)
 
     if base_price > holding.max_entry_price:
         log.warning(
