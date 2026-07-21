@@ -6,10 +6,10 @@ from math import isfinite
 from typing import Literal
 
 IdeaSide = Literal["long", "short"]
-IdeaStatus = Literal["pending", "executed", "rejected"]
+IdeaStatus = Literal["pending", "executed", "filled", "rejected"]
 
 IDEA_SIDES: tuple[IdeaSide, ...] = ("long", "short")
-IDEA_STATUSES: tuple[IdeaStatus, ...] = ("pending", "executed", "rejected")
+IDEA_STATUSES: tuple[IdeaStatus, ...] = ("pending", "executed", "filled", "rejected")
 
 
 @dataclass(frozen=True, slots=True)

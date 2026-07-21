@@ -41,6 +41,7 @@ def record_order(order: TradeOrder) -> str:
         Item={
             "strategy": order.strategy,
             "trade_id": trade_id,
+            "idea_id": order.idea_id,
             "symbol": order.symbol,
             "side": order.side,
             "target_quantity": order.target_quantity,
@@ -64,13 +65,16 @@ def apply_fill(
     quantity: int,
     price: float,
     filled_at: datetime,
-) -> None:
+) -> str | None:
     """Fold one broker fill into its ledger order.
 
     Accumulates ``filled_quantity`` and ``filled_cost``; once the target
     quantity is reached, stamps ``filled_price`` (weighted average) and
     ``filled_at``. ``filled_at`` should come from the strategy clock and is
     only written when this fill completes the order.
+
+    Returns the order's ``idea_id`` when this fill completes it (so the caller
+    can move the idea to ``filled``), otherwise ``None``.
     """
     table = get_table(TABLE_NAME)
     item = table.get_item(Key={"strategy": strategy, "trade_id": trade_id}).get("Item")
@@ -86,8 +90,9 @@ def apply_fill(
         ":c": filled_cost,
     }
     expression = "SET filled_quantity = :q, filled_cost = :c"
+    completed = filled_quantity >= int(item["target_quantity"])
 
-    if filled_quantity >= int(item["target_quantity"]):
+    if completed:
         expression += ", filled_price = :p, filled_at = :t"
         updates[":p"] = filled_cost / filled_quantity
         updates[":t"] = filled_at.isoformat()
@@ -97,6 +102,8 @@ def apply_fill(
         UpdateExpression=expression,
         ExpressionAttributeValues=updates,
     )
+
+    return str(item["idea_id"]) if completed else None
 
 
 def load_open_orders(strategy: str) -> pd.DataFrame:

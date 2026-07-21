@@ -12,10 +12,13 @@ class TradeOrder:
     ``target_quantity`` is the full intended position size; fills accumulate
     against it in the ledger, possibly across several trading days.
     ``max_entry_price`` rides along so the morning re-submit job can recompute
-    a fresh limit price without needing the draft portfolio.
+    a fresh limit price without needing the draft portfolio. ``idea_id`` links
+    back to the trade idea this order executes — the ledger row is the single
+    source of truth for that link.
     """
 
     strategy: str
+    idea_id: str
     symbol: str
     side: str
     target_quantity: int
@@ -27,6 +30,9 @@ class TradeOrder:
         """Reject malformed orders at the domain boundary."""
         if not self.strategy.strip():
             raise ValueError("strategy must not be empty")
+
+        if not self.idea_id.strip():
+            raise ValueError("idea_id must not be empty")
 
         if not self.symbol or self.symbol != self.symbol.strip().upper():
             raise ValueError("symbol must be a nonempty normalized symbol")

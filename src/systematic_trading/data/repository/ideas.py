@@ -1,9 +1,11 @@
 """DynamoDB trade-ideas table: trade proposals from the fundamental agent.
 
 An idea is a proposal, not a trade. The agent submits it as ``pending``; the
-executor later marks it ``executed`` (linking the resulting trade-ledger
-``trade_id``) or ``rejected``. Each item carries the reference price at
-submission time so idea quality can be measured independently of execution.
+executor later marks it ``executed`` (order submitted), ``filled`` (target
+quantity reached), or ``rejected``. The idea-to-order link lives on the
+trade-ledger row (``idea_id``), not here. Each item carries the reference
+price at submission time so idea quality can be measured independently of
+execution.
 
 Keyed like the ledger: ``strategy`` partition + timestamp-prefixed ``idea_id``
 sort key, so a query returns ideas in chronological order.
@@ -50,7 +52,6 @@ def submit_idea(idea: TradeIdea) -> str:
             "created_at": idea.created_at.isoformat(),
             "model": idea.model,
             "status": "pending",
-            "ledger_trade_id": None,
         }
     )
 
@@ -94,13 +95,8 @@ def load_ideas(strategy: str, status: IdeaStatus | None = None) -> pd.DataFrame:
     return pd.DataFrame(items)
 
 
-def update_idea_status(
-    strategy: str,
-    idea_id: str,
-    status: IdeaStatus,
-    ledger_trade_id: str | None = None,
-) -> None:
-    """Move one idea through its lifecycle; link the ledger fill when executed."""
+def update_idea_status(strategy: str, idea_id: str, status: IdeaStatus) -> None:
+    """Move one idea through its lifecycle."""
 
     if status not in IDEA_STATUSES:
         raise ValueError(f"unknown status {status!r}; expected one of {IDEA_STATUSES}")
@@ -108,12 +104,12 @@ def update_idea_status(
     # 'status' is a DynamoDB reserved word, so the expression aliases it via #s.
     get_table(TABLE_NAME).update_item(
         Key={"strategy": strategy, "idea_id": idea_id},
-        UpdateExpression="SET #s = :s, ledger_trade_id = :t",
+        UpdateExpression="SET #s = :s",
         ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": status, ":t": ledger_trade_id},
+        ExpressionAttributeValues={":s": status},
     )
 
 
 if __name__ == "__main__":
     ideas = load_ideas("csf_champions")
-    print(ideas)
+    print(ideas.columns)
