@@ -146,7 +146,7 @@ def apply_fill(
     )
 
 
-def reconcile_fill(
+def sync_fill(
     strategy: str,
     trade_id: str,
     filled_quantity: int,
@@ -160,7 +160,7 @@ def reconcile_fill(
     ``apply_fill`` this sets absolute values — quantity from the broker
     position, cost from its average entry price — so it is idempotent.
 
-    Returns the order's ``idea_id`` when the reconciled quantity completes it,
+    Returns the order's ``idea_id`` when the synced quantity completes it,
     otherwise ``None``.
     """
     table = get_table(TABLE_NAME)

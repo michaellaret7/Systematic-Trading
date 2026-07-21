@@ -123,13 +123,20 @@ def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> 
         return False
 
     order = strategy.create_order(
-        holding.ticker, quantity, "buy", limit_price=limit_price, time_in_force="day"
+        holding.ticker, 
+        quantity, 
+        "buy", 
+        limit_price=limit_price, 
+        time_in_force="day",
+        order_id=order.identifier
     )
 
     strategy.submit_order(order)
 
     # Ledger writes are live/paper only; fills accumulate against this row via
     # the strategy's fill hooks, keyed through the order-id -> trade_id map.
+    # This is where the order is recorded in the trade ledger and the idea status 
+    # is updated to "executed"
     if not strategy.is_backtesting:
         trade_id = record_order(
             TradeOrder(

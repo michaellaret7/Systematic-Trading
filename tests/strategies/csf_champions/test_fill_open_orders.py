@@ -1,4 +1,4 @@
-"""Prove the sweep cannot duplicate orders that are already working or filled.
+﻿"""Prove the sweep cannot duplicate orders that are already working or filled.
 
 Replays the 2026-07-21 incident: entry orders submitted seconds earlier, their
 fills dropped by Lumibot's first-iteration event blackout (ledger rows still
@@ -99,7 +99,7 @@ def ledger_spy(monkeypatch: pytest.MonkeyPatch) -> dict:
     def fake_load_open_orders(strategy: str) -> pd.DataFrame:
         raise AssertionError("each test monkeypatches its own rows")
 
-    def fake_reconcile_fill(
+    def fake_sync_fill(
         strategy: str,
         trade_id: str,
         filled_quantity: int,
@@ -118,7 +118,7 @@ def ledger_spy(monkeypatch: pytest.MonkeyPatch) -> dict:
     calls["targets"] = targets
 
     monkeypatch.setattr(sweep, "load_open_orders", fake_load_open_orders)
-    monkeypatch.setattr(sweep, "reconcile_fill", fake_reconcile_fill)
+    monkeypatch.setattr(sweep, "sync_fill", fake_sync_fill)
     monkeypatch.setattr(sweep, "update_idea_status", fake_update_idea_status)
 
     return calls
@@ -180,7 +180,7 @@ def test_morning_remainder_is_sized_from_broker_truth(
     """Next morning: no working orders, ledger stale at 143, broker holds 1200.
 
     The re-submit must be target - position (274 shares), not target - stale
-    ledger (1331) — over-buying past target is impossible even with a stale
+    ledger (1331) â€” over-buying past target is impossible even with a stale
     ledger.
     """
     set_rows(monkeypatch, ledger_spy, [open_row("FSM", 1474, filled=143)])

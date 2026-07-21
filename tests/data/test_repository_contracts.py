@@ -1,4 +1,4 @@
-"""Typed domain records crossing the DynamoDB repository boundary."""
+﻿"""Typed domain records crossing the DynamoDB repository boundary."""
 
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -158,7 +158,7 @@ def test_apply_fill_completes_order_with_weighted_average(
     assert values[":t"] == "2026-07-16T00:00:00+00:00"
 
 
-def test_reconcile_fill_overwrites_with_broker_truth(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_fill_overwrites_with_broker_truth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reconciliation sets absolute quantity and cost from the broker position."""
     table = FakeTable(
         item={
@@ -172,7 +172,7 @@ def test_reconcile_fill_overwrites_with_broker_truth(monkeypatch: pytest.MonkeyP
     )
     monkeypatch.setattr(ledger, "get_table", lambda name: table)
 
-    completed_idea = ledger.reconcile_fill(
+    completed_idea = ledger.sync_fill(
         "csf_champions",
         "2026-07-15T00:00:00+00:00#AAPL#aaaa1111",
         filled_quantity=30,
@@ -188,7 +188,7 @@ def test_reconcile_fill_overwrites_with_broker_truth(monkeypatch: pytest.MonkeyP
     assert ":t" not in values
 
 
-def test_reconcile_fill_completes_row_at_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_fill_completes_row_at_target(monkeypatch: pytest.MonkeyPatch) -> None:
     """A position at or past target closes the row and returns the idea to flip."""
     table = FakeTable(
         item={
@@ -202,7 +202,7 @@ def test_reconcile_fill_completes_row_at_target(monkeypatch: pytest.MonkeyPatch)
     )
     monkeypatch.setattr(ledger, "get_table", lambda name: table)
 
-    completed_idea = ledger.reconcile_fill(
+    completed_idea = ledger.sync_fill(
         "csf_champions",
         "2026-07-15T00:00:00+00:00#AAPL#aaaa1111",
         filled_quantity=40,
