@@ -1,8 +1,8 @@
 """Lumibot adapter for the CSF Champions strategy.
 
 Startup pipeline (runs once in ``initialize``): generate trade ideas (skipped
-when ``trade_ideas_generated`` is True), then build the draft portfolio via the
-portfolio-constructor agent. Trade submission is a later step, not yet designed.
+when ``trade_ideas_generated`` is True), build the draft portfolio via the
+portfolio-constructor agent, then submit the book as whole-share limit buys.
 """
 
 from lumibot.strategies import Strategy
@@ -11,6 +11,9 @@ from systematic_trading.logging_setup import get_logger
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 from systematic_trading.strategies.csf_champions.workflows.build_portfolio import (
     construct_portfolio,
+)
+from systematic_trading.strategies.csf_champions.workflows.enter_positions import (
+    enter_positions,
 )
 from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas import (
     generate_trade_ideas,
@@ -55,7 +58,8 @@ class CsfChampions(Strategy):
 
         construct_portfolio(self.portfolio)
 
-        # TODO: submit-trades workflow (not yet designed).
+        # Push the finalized draft book to the broker as whole-share limit buys.
+        enter_positions(self, self.portfolio)
 
     def on_trading_iteration(self) -> None:
         pass
