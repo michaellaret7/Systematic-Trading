@@ -12,8 +12,8 @@ Datasets:
   fundamental screener reads from.
 - **Prices** (``prices``) — the daily split-adjusted OHLCV parquet covering
   the trailing 4 years for every panel symbol.
-- **Trade ledger** (``ledger``) — append-only DynamoDB record of live/paper
-  fills, one item per fill, keyed by strategy.
+- **Trade ledger** (``ledger``) — DynamoDB record of live/paper entry orders,
+  one item per order with fill state accumulated in place, keyed by strategy.
 - **Trade ideas** (``ideas``) — DynamoDB queue of the fundamental agent's
   trade proposals: pending until the executor marks them executed/rejected.
 """
@@ -41,8 +41,10 @@ from systematic_trading.data.repository.ideas import (
     update_idea_status,
 )
 from systematic_trading.data.repository.ledger import (
+    apply_fill,
+    load_open_orders,
     load_trades,
-    record_fill,
+    record_order,
 )
 from systematic_trading.data.repository.prices import (
     daily_prices_uri,
@@ -53,10 +55,12 @@ from systematic_trading.data.repository.prices import (
 __all__ = [
     "PERIODS",
     "STATEMENTS",
+    "apply_fill",
     "count_ideas_since",
     "daily_prices_uri",
     "load_daily_prices",
     "load_ideas",
+    "load_open_orders",
     "load_panel",
     "load_sector_tags",
     "load_statement",
@@ -64,7 +68,7 @@ __all__ = [
     "load_universe",
     "panel_symbols",
     "panel_uri",
-    "record_fill",
+    "record_order",
     "statement_columns",
     "statement_uri",
     "submit_idea",

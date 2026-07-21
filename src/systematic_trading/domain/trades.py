@@ -1,4 +1,4 @@
-"""Executed-trade records shared by strategies and the trade ledger."""
+"""Order records shared by strategies and the trade ledger."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -6,18 +6,25 @@ from math import isfinite
 
 
 @dataclass(frozen=True, slots=True)
-class TradeFill:
-    """One broker fill before persistence in the trade ledger."""
+class TradeOrder:
+    """One submitted entry order before persistence in the trade ledger.
+
+    ``target_quantity`` is the full intended position size; fills accumulate
+    against it in the ledger, possibly across several trading days.
+    ``max_entry_price`` rides along so the morning re-submit job can recompute
+    a fresh limit price without needing the draft portfolio.
+    """
 
     strategy: str
     symbol: str
     side: str
-    quantity: float
-    price: float
-    filled_at: datetime
+    target_quantity: int
+    limit_price: float
+    max_entry_price: float
+    submitted_at: datetime
 
     def __post_init__(self) -> None:
-        """Reject malformed fills at the domain boundary."""
+        """Reject malformed orders at the domain boundary."""
         if not self.strategy.strip():
             raise ValueError("strategy must not be empty")
 
@@ -27,11 +34,14 @@ class TradeFill:
         if not self.side.strip():
             raise ValueError("side must not be empty")
 
-        if not isfinite(self.quantity) or self.quantity <= 0:
-            raise ValueError("quantity must be positive")
+        if self.target_quantity <= 0:
+            raise ValueError("target_quantity must be positive")
 
-        if not isfinite(self.price) or self.price <= 0:
-            raise ValueError("price must be positive")
+        if not isfinite(self.limit_price) or self.limit_price <= 0:
+            raise ValueError("limit_price must be positive")
 
-        if not isinstance(self.filled_at, datetime):
-            raise ValueError("filled_at must be a datetime")
+        if not isfinite(self.max_entry_price) or self.max_entry_price <= 0:
+            raise ValueError("max_entry_price must be positive")
+
+        if not isinstance(self.submitted_at, datetime):
+            raise ValueError("submitted_at must be a datetime")
