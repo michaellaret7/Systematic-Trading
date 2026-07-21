@@ -1,6 +1,6 @@
 """Launch a self-terminating RunPod CPU pod that runs the trade-ideas job.
 
-Thin wrapper over ``systematic_trading.cloud.runpod.launch_pod`` — the pod
+Thin wrapper over ``systematic_trading.cloud.runpod.launch_job_pod`` — the pod
 lifecycle (restart guard, self-delete, memory monitor, S3 log sync) lives
 there. This script only picks the job and its sizing.
 
@@ -8,7 +8,7 @@ Usage:
     uv run python scripts/launch_trade_ideas_pod.py
 """
 
-from systematic_trading.cloud.runpod import launch_pod
+from systematic_trading.cloud.runpod import launch_job_pod
 
 # The original cpu3c/2 gave 4 GB, and every one of the 30 full runs on
 # 2026-07-17 died at 5-17 minutes without completing a single ticker —
@@ -17,7 +17,7 @@ from systematic_trading.cloud.runpod import launch_pod
 # dollars for a full run.
 
 if __name__ == "__main__":
-    launch_pod(
+    launch_job_pod(
         job_name="trade_ideas",
         job_module="systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas",
         cpu_flavor="cpu3g",

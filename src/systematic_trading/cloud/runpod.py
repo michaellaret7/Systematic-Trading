@@ -1,6 +1,6 @@
 """Launch RunPod CPU pods that run our workloads, in one of two lifecycles.
 
-``launch_pod()`` runs a finite job: the pod clones the repo, installs
+``launch_job_pod()`` runs a finite job: the pod clones the repo, installs
 dependencies with uv, runs the given job module via ``python -m``, syncs the
 run log to ``s3://<S3_BUCKET>/logs/<job_name>/<utc-stamp>.log`` every five
 minutes (and once more at the end), and then deletes itself — on success or
@@ -287,7 +287,7 @@ sleep 60
 #     ================================
 
 
-def launch_pod(
+def launch_job_pod(
     job_name: str,
     job_module: str,
     *,
