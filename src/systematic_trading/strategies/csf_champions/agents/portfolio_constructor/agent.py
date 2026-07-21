@@ -29,6 +29,7 @@ from systematic_trading.strategies.csf_champions.portfolio import Holding, Portf
 STRATEGY = "csf_champions"
 MODEL = "openai/gpt-5.6-sol-pro"
 
+
 def build_portfolio_constructor(portfolio: Portfolio, bench: dict[str, Holding]) -> Agent:
     """Construct a portfolio-constructor agent bound to the given book and bench."""
     return Agent(

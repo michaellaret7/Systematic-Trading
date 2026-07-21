@@ -1,8 +1,9 @@
 """Lumibot adapter for the CSF Champions strategy.
 
-Startup pipeline (runs once in ``initialize``): generate trade ideas (skipped
-when ``trade_ideas_generated`` is True), build the draft portfolio via the
-portfolio-constructor agent, then submit the book as whole-share limit buys.
+Startup pipeline (runs once in ``initialize``, gated by ``build_portfolio``):
+generate trade ideas (only when ``generate_ideas`` is True), build the draft
+portfolio via the portfolio-constructor agent, then submit the book as
+whole-share limit buys.
 
 Daily loop: re-submit the unfilled remainder of open ledger orders. Broker
 fill events accumulate into the ledger via the fill hooks, and an idea is
@@ -38,12 +39,13 @@ class CsfChampions(Strategy):
     WARM_UP_TRADING_DAYS = 0
 
     parameters = {
-        # True -> ideas already sit in DynamoDB; skip the (expensive) agent run.
-        "trade_ideas_generated": True,
-        # True -> run the initialization pipeline (idea generation, portfolio
-        # construction, submission). False -> the portfolio already lives in
-        # the broker; skip straight to the daily loop.
-        "force_initialization": False,
+        # True -> run the (expensive) idea-generation agent before building
+        # the book. False -> use the ideas already in DynamoDB.
+        "generate_ideas": False,
+        # True -> build the draft portfolio and submit entry orders at
+        # startup. False -> the book already lives at the broker; go straight
+        # to the daily loop.
+        "build_portfolio": True,
     }
 
     # This is the first function that runs, it runs once at the beginning of the entire strategy run
@@ -59,17 +61,17 @@ class CsfChampions(Strategy):
         # reconciled by the next morning's open-order sweep.
         self.order_trade_ids: dict[str, str] = {}
 
-        # The flag is the single switch: only run the initialization pipeline
+        # The flag is the single switch: only run the startup pipeline
         # (idea generation, construction, submission) when explicitly asked.
-        if not self.parameters["force_initialization"]:
-            log.info("force_initialization is off — skipping initialization pipeline")
+        if not self.parameters["build_portfolio"]:
+            log.info("build_portfolio is off — skipping startup pipeline")
             return
 
-        if self.parameters["trade_ideas_generated"]:
-            log.info("Trade ideas already generated — pulling from DynamoDB")
-        else:
+        if self.parameters["generate_ideas"]:
             log.info("Generating trade ideas")
             generate_trade_ideas()
+        else:
+            log.info("Using existing trade ideas from DynamoDB")
 
         construct_portfolio(self.portfolio)
 
@@ -97,11 +99,7 @@ class CsfChampions(Strategy):
             return
 
         completed_idea = apply_fill(
-            STRATEGY, 
-            trade_id, 
-            int(quantity), 
-            float(price), 
-            self.get_datetime()
+            STRATEGY, trade_id, int(quantity), float(price), self.get_datetime()
         )
 
         if completed_idea:
@@ -120,7 +118,7 @@ class CsfChampions(Strategy):
     def on_filled_order(
         self, position: Position, order: Order, price: float, quantity: float, multiplier: float
     ) -> None:
-    
+
         if self.is_backtesting:
             return
 

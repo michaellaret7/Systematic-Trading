@@ -3,12 +3,18 @@
 import subprocess
 import sys
 
+from lumibot.strategies import Strategy
+
 from systematic_trading.strategies import STRATEGIES
 
 
-def test_registry_is_truthfully_empty_until_strategy_is_implemented() -> None:
-    """No incomplete strategy is exposed to live or backtest runners."""
-    assert STRATEGIES == {}
+def test_registry_exposes_complete_strategies() -> None:
+    """Every registered strategy is a runnable Lumibot strategy class."""
+    assert "csf_champions" in STRATEGIES
+
+    for name, strategy_class in STRATEGIES.items():
+        assert issubclass(strategy_class, Strategy), name
+        assert hasattr(strategy_class, "WARM_UP_TRADING_DAYS"), name
 
 
 def test_fmp_client_import_does_not_initialize_lumibot() -> None:

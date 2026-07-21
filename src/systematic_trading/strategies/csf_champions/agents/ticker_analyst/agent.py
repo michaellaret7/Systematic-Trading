@@ -29,6 +29,7 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.subagents
 STRATEGY = "csf_champions"
 MODEL = "openai/gpt-5.6-sol"
 
+
 def build_ticker_analyst() -> Agent:
     """Construct a fresh ticker-analyst agent.
 
