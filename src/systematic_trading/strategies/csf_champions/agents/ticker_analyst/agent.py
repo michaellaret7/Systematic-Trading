@@ -52,4 +52,3 @@ def build_ticker_analyst() -> Agent:
             RISK_SUBAGENT_CONFIG,
         ],
     )
-
