@@ -26,7 +26,11 @@ class CsfChampions(Strategy):
 
     parameters = {
         # True -> ideas already sit in DynamoDB; skip the (expensive) agent run.
-        "trade_ideas_generated": False,
+        "trade_ideas_generated": True,
+        # True -> run the initialization pipeline (idea generation, portfolio
+        # construction, submission). False -> the portfolio already lives in
+        # the broker; skip straight to the daily loop.
+        "force_initialization": False,
     }
 
     # This is the first function that runs, it runs once at the beginning of the entire strategy run
@@ -36,6 +40,12 @@ class CsfChampions(Strategy):
         # The draft book is stateful across the whole strategy run: created
         # empty here, seeded and shaped by build_portfolio, read by submission.
         self.portfolio = Portfolio()
+
+        # The flag is the single switch: only run the initialization pipeline
+        # (idea generation, construction, submission) when explicitly asked.
+        if not self.parameters["force_initialization"]:
+            log.info("force_initialization is off — skipping initialization pipeline")
+            return
 
         if self.parameters["trade_ideas_generated"]:
             log.info("Trade ideas already generated — pulling from DynamoDB")
