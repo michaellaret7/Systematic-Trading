@@ -1,9 +1,9 @@
-﻿"""Reconcile open ledger orders against broker truth, then re-submit remainders.
+"""Reconcile open ledger orders against broker truth, then re-submit remainders.
 
 Runs every trading iteration. The fill hooks are best-effort: Lumibot silently
 drops trade events processed during a session's first iteration, so the ledger
 can lag the broker. This sweep treats the broker position as the truth for
-each open row â€” healing missed fills (closing rows and flipping ideas to
+each open row — healing missed fills (closing rows and flipping ideas to
 ``filled`` when the target is already held) before deciding what remainder, if
 any, still needs a fresh DAY limit buy at today's price.
 
@@ -23,6 +23,7 @@ from systematic_trading.data.repository import load_open_orders, sync_fill, upda
 from systematic_trading.logging_setup import get_logger
 from systematic_trading.strategies.csf_champions.workflows.enter_positions import (
     STRATEGY,
+    consolidated_prices,
     entry_base_price,
     entry_limit_price,
 )
@@ -68,7 +69,7 @@ def reconcile_row(strategy: Strategy, row: dict) -> int:
 
     if avg_price <= 0:
         log.warning(
-            "%s: position %d exceeds recorded %d but has no average price â€” not healing",
+            "%s: position %d exceeds recorded %d but has no average price — not healing",
             row["symbol"],
             position_qty,
             recorded,
@@ -80,7 +81,7 @@ def reconcile_row(strategy: Strategy, row: dict) -> int:
     )
 
     log.info(
-        "%s: healed ledger from broker â€” %d -> %d/%d @ avg $%.2f",
+        "%s: healed ledger from broker — %d -> %d/%d @ avg $%.2f",
         row["symbol"],
         recorded,
         position_qty,
@@ -94,20 +95,20 @@ def reconcile_row(strategy: Strategy, row: dict) -> int:
     return position_qty
 
 
-def resubmit_remainder(strategy: Strategy, row: dict, remainder: int) -> bool:
+def resubmit_remainder(strategy: Strategy, row: dict, remainder: int, anchor: float | None) -> bool:
     """Submit a fresh DAY limit buy for one open row's remainder; True if sent."""
     symbol = row["symbol"]
 
-    base_price = entry_base_price(strategy, symbol)
+    base_price = entry_base_price(strategy, symbol, anchor)
 
     if base_price is None:
-        log.warning("%s: no price available â€” leaving remainder for tomorrow", symbol)
+        log.warning("%s: no price available — leaving remainder for tomorrow", symbol)
         return False
 
     limit_price = entry_limit_price(base_price, float(row["max_entry_price"]))
 
     if limit_price <= 0:
-        log.warning("%s: computed limit price is not positive â€” skipping", symbol)
+        log.warning("%s: computed limit price is not positive — skipping", symbol)
         return False
 
     order = strategy.create_order(
@@ -140,6 +141,10 @@ def fill_open_orders(strategy: Strategy) -> None:
     healed_closed = 0
     resubmitted = 0
 
+    # One batched call up front; most rows will not need it, but a single round
+    # trip is cheaper than deciding per row.
+    anchors = consolidated_prices(list(open_orders["symbol"]))
+
     for row in open_orders.to_dict("records"):
         true_filled = reconcile_row(strategy, row)
 
@@ -150,10 +155,10 @@ def fill_open_orders(strategy: Strategy) -> None:
             continue
 
         if row["symbol"] in working:
-            log.info("%s: buy order already working â€” skipping", row["symbol"])
+            log.info("%s: buy order already working — skipping", row["symbol"])
             continue
 
-        if resubmit_remainder(strategy, row, remainder):
+        if resubmit_remainder(strategy, row, remainder, anchors.get(row["symbol"])):
             resubmitted += 1
 
     log.info(

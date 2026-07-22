@@ -1,20 +1,20 @@
-﻿"""The data repository: the only code that knows where our datasets live.
+"""The data repository: the only code that knows where our datasets live.
 
-Everything above this layer â€” screeners, strategies, agents, tools â€” reads and
+Everything above this layer — screeners, strategies, agents, tools — reads and
 writes stored data through these functions, never by building S3 URIs or
 calling ``read_parquet`` on raw paths. Providers (``data.providers``) are
 called only by the push/build scripts that fill the repository.
 
 Datasets:
 
-- **Fundamentals** (``fundamentals``) â€” raw FMP statement parquets
+- **Fundamentals** (``fundamentals``) — raw FMP statement parquets
   (5 statements x quarter/annual) plus the built metrics panel every
   fundamental screener reads from.
-- **Prices** (``prices``) â€” the daily split-adjusted OHLCV parquet covering
+- **Prices** (``prices``) — the daily split-adjusted OHLCV parquet covering
   the trailing 4 years for every panel symbol.
-- **Trade ledger** (``ledger``) â€” DynamoDB record of live/paper entry orders,
+- **Trade ledger** (``ledger``) — DynamoDB record of live/paper entry orders,
   one item per order with fill state accumulated in place, keyed by strategy.
-- **Trade ideas** (``ideas``) â€” DynamoDB queue of the fundamental agent's
+- **Trade ideas** (``ideas``) — DynamoDB queue of the fundamental agent's
   trade proposals: pending until the executor marks them executed/rejected.
 """
 

@@ -2,10 +2,10 @@
 
 Turns each draft holding into a whole-share marketable DAY limit order: sized
 as the holding's weight of the current account value, priced at the quoted ask
-plus a small buffer but never above the analyst's max entry price. The last
-trade price is the fallback base when the quote is missing or looks like feed
-flicker. Holdings that cannot be entered (no price, or a target too small for
-one whole share) are logged and skipped, never retried.
+plus a small buffer but never above the analyst's max entry price. FMP's
+consolidated price is the fallback base when the quote is missing or looks like
+feed flicker. Holdings that cannot be entered (no price, or a target too small
+for one whole share) are logged and skipped, never retried.
 
 In live/paper runs each submission is also recorded in the trade ledger with
 its full target quantity, and the broker order id is mapped to the ledger row
@@ -14,8 +14,10 @@ so fill events can accumulate against it.
 
 import math
 
+import requests
 from lumibot.strategies import Strategy
 
+from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.data.repository import record_order, update_idea_status
 from systematic_trading.domain.trades import TradeOrder
 from systematic_trading.logging_setup import get_logger
@@ -29,8 +31,10 @@ STRATEGY = "csf_champions"
 # fills immediately while still capping the worst acceptable fill.
 LIMIT_BUFFER_PCT = 0.5
 
-# Ask sanity cap: an ask more than this % above the last trade is treated as
-# feed flicker (thin IEX quote) and the last trade price is used instead.
+# Ask sanity cap: an ask more than this % above the consolidated reference price
+# is treated as feed flicker (thin IEX quote) and the reference is used instead.
+# Measured live, the two populations separate cleanly: believable asks sit within
+# ~1.7% of the reference, while flickering IEX asks sit 5-15% above it.
 MAX_ASK_PREMIUM_PCT = 2.0
 
 
@@ -39,37 +43,67 @@ MAX_ASK_PREMIUM_PCT = 2.0
 #     ================================
 
 
-def entry_base_price(strategy: Strategy, ticker: str) -> float | None:
-    """Price to build the marketable limit from: the ask when sane, else last trade.
+def consolidated_prices(tickers: list[str]) -> dict[str, float]:
+    """Consolidated last trade per ticker from FMP, fetched in one call.
 
-    The ask is what a buy must cross to fill immediately; the last trade price
-    is the fallback when the quote is missing or implausibly far above it.
-    Alpaca reports "no quote" as 0.0 rather than None, so any non-positive
-    price is treated as missing.
+    The broker feed is single-venue (IEX), so its last trade can sit stale for
+    an hour on a thin name while the stock trades elsewhere — which makes it
+    useless for judging whether an ask is believable. FMP is delayed ~15 minutes
+    but consolidated across venues, so it tracks the real price to well under 1%.
+
+    A failure here is not fatal: callers fall back to the broker's own last
+    trade, which is what this strategy used before.
     """
-    ask = strategy.get_quote(ticker).ask
-    last_price = strategy.get_last_price(ticker)
+    try:
+        return FMPClient().quotes(tickers)
+    except (RuntimeError, requests.RequestException) as error:
+        log.warning("FMP reference prices unavailable (%s) — using broker prices", error)
+        return {}
 
+
+def choose_base_price(ask: float | None, anchor: float | None, ticker: str) -> float | None:
+    """Pick the price to build the marketable limit from: the ask when sane.
+
+    The ask is what a buy must cross to fill immediately; the consolidated
+    anchor is the fallback when the quote is missing or implausibly far above
+    it. Alpaca reports "no quote" as 0.0 rather than None, so any non-positive
+    price is treated as missing. ``ticker`` is used only for logging.
+    """
     if ask is not None and float(ask) <= 0:
         ask = None
 
-    if last_price is not None and float(last_price) <= 0:
-        last_price = None
+    if anchor is not None and float(anchor) <= 0:
+        anchor = None
 
     if ask is None:
-        return float(last_price) if last_price is not None else None
+        return float(anchor) if anchor is not None else None
 
-    if last_price is not None and float(ask) > float(last_price) * (1 + MAX_ASK_PREMIUM_PCT / 100):
+    if anchor is not None and float(ask) > float(anchor) * (1 + MAX_ASK_PREMIUM_PCT / 100):
         log.warning(
-            "%s: ask $%.2f is >%s%% above last trade $%.2f — using last trade",
+            "%s: ask $%.2f is >%s%% above reference $%.2f — using reference",
             ticker,
             float(ask),
             MAX_ASK_PREMIUM_PCT,
-            float(last_price),
+            float(anchor),
         )
-        return float(last_price)
+        return float(anchor)
 
     return float(ask)
+
+
+def entry_base_price(strategy: Strategy, ticker: str, anchor: float | None) -> float | None:
+    """Resolve the broker's ask against a consolidated anchor into one base price.
+
+    ``anchor`` comes from a batched `consolidated_prices` call; when it is missing
+    (FMP unreachable, or no quote for this ticker) the broker's own last trade
+    stands in, which is what this strategy used before.
+    """
+    ask = strategy.get_quote(ticker).ask
+
+    if not anchor:
+        anchor = strategy.get_last_price(ticker)
+
+    return choose_base_price(ask, anchor, ticker)
 
 
 def entry_limit_price(base_price: float, max_entry_price: float) -> float:
@@ -79,13 +113,15 @@ def entry_limit_price(base_price: float, max_entry_price: float) -> float:
     return round(min(marketable, max_entry_price), 2)
 
 
-def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> bool:
+def submit_entry(
+    strategy: Strategy, holding: Holding, account_value: float, anchor: float | None
+) -> bool:
     """Size and submit one whole-share limit buy; True if an order went out.
 
     The share count divides the dollar target by the limit price (not the base
     price), so even a fill at the cap cannot overspend the holding's weight.
     """
-    base_price = entry_base_price(strategy, holding.ticker)
+    base_price = entry_base_price(strategy, holding.ticker, anchor)
 
     if base_price is None:
         log.warning("%s: no price available — skipping entry", holding.ticker)
@@ -134,7 +170,7 @@ def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> 
 
     # Ledger writes are live/paper only; fills accumulate against this row via
     # the strategy's fill hooks, keyed through the order-id -> trade_id map.
-    # This is where the order is recorded in the trade ledger and the idea status 
+    # This is where the order is recorded in the trade ledger and the idea status
     # is updated to "executed"
     if not strategy.is_backtesting:
         trade_id = record_order(
@@ -179,6 +215,10 @@ def enter_positions(strategy: Strategy, portfolio: Portfolio) -> None:
     account_value = float(strategy.portfolio_value)
     submitted = 0
 
+    # One batched call up front, so pricing the book costs a single round trip
+    # rather than one per holding.
+    anchors = consolidated_prices([holding.ticker for holding in portfolio.holdings.values()])
+
     # This is where the orders are submitted to the broker from
     # They are pulled from the Portfolio() object populated by the agent
     for holding in portfolio.holdings.values():
@@ -188,7 +228,7 @@ def enter_positions(strategy: Strategy, portfolio: Portfolio) -> None:
             )
             continue
 
-        if submit_entry(strategy, holding, account_value):
+        if submit_entry(strategy, holding, account_value, anchors.get(holding.ticker)):
             submitted += 1
 
     log.info(

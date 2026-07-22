@@ -1,6 +1,6 @@
 """Financial Modeling Prep stable-API client.
 
-Wraps https://financialmodelingprep.com/stable/ for the two dataset families we use:
+Wraps https://financialmodelingprep.com/stable/ for the dataset families we use:
 
 - **Historical prices** — every increment FMP offers: intraday bars (1min, 5min,
   15min, 30min, 1hour, 4hour) and daily EOD in three adjustment flavors. FMP caps
@@ -8,6 +8,9 @@ Wraps https://financialmodelingprep.com/stable/ for the two dataset families we 
   depending on interval; daily is 5,000 rows) with no cursor, so the fetchers walk
   the requested range backward in windows and stitch the results.
 - **Fundamentals** — income statement, balance sheet, cash flow statement, ratios.
+- **Quotes** — the latest consolidated trade price, fetched for many symbols at
+  once, used as a cross-exchange sanity reference for prices taken from our
+  single-venue broker feed.
 
 Point-in-time note: statement rows carry ``acceptedDate`` (the SEC acceptance
 timestamp — when the numbers became publicly known). Filter on it, never on
@@ -109,9 +112,10 @@ def _statement_frame(rows: list[dict]) -> pd.DataFrame:
 class FMPClient:
     """Thin synchronous client for the FMP stable API.
 
-    All methods return pandas DataFrames. Price frames are indexed by tz-aware
-    Eastern timestamps with uniform ``open/high/low/close/volume`` columns;
-    statement frames keep every field FMP returns, oldest row first.
+    Dataset methods return pandas DataFrames (``quotes`` is the exception, being
+    a symbol-to-price mapping). Price frames are indexed by tz-aware Eastern
+    timestamps with uniform ``open/high/low/close/volume`` columns; statement
+    frames keep every field FMP returns, oldest row first.
     """
 
     def __init__(self, api_key: str | None = None, timeout: float = 30.0):
@@ -179,6 +183,23 @@ class FMPClient:
         rows = self._get(path, {"symbol": symbol, "period": period, "limit": limit})
 
         return _statement_frame(rows)
+
+    def quotes(self, symbols: list[str]) -> dict[str, float]:
+        """Latest consolidated trade price per symbol, in a single request.
+
+        Delayed by roughly 15 minutes on the standard plan, so these are
+        cross-exchange sanity references — never prices to build an order from.
+        Their value is that they are consolidated: unlike a single-venue last
+        trade they cannot sit an hour stale while the stock trades elsewhere.
+
+        Symbols FMP has no quote for are simply absent from the mapping.
+        """
+        if not symbols:
+            return {}
+
+        rows = self._get("batch-quote-short", {"symbols": ",".join(symbols)})
+
+        return {row["symbol"]: float(row["price"]) for row in rows if row.get("price")}
 
     def intraday_prices(
         self,
