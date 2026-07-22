@@ -1,4 +1,4 @@
-﻿"""Prove the sweep cannot duplicate orders that are already working or filled.
+"""Prove the sweep cannot duplicate orders that are already working or filled.
 
 Replays the 2026-07-21 incident: entry orders submitted seconds earlier, their
 fills dropped by Lumibot's first-iteration event blackout (ledger rows still
@@ -23,7 +23,6 @@ def open_row(symbol: str, target: int, filled: int = 0) -> dict:
         "symbol": symbol,
         "target_quantity": target,
         "filled_quantity": filled,
-        "max_entry_price": 500.0,
     }
 
 

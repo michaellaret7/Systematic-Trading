@@ -3,8 +3,8 @@
 Deletes every ``trade-ledger`` row for the strategy (orders and their fill
 state) and moves every ``trade-ideas`` row back to ``pending``, which is the
 state the agent submits them in. Everything else on an idea — score, thesis,
-reference and max entry prices — is written once at submission and never
-mutated, so status is the only field execution dirties.
+reference price — is written once at submission and never mutated, so status
+is the only field execution dirties.
 
 Intended for iterating on live/paper execution logic: run it between test runs
 so the next run sees the same ideas the agent originally produced.

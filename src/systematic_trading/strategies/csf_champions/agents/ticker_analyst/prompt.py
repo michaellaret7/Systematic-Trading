@@ -164,11 +164,12 @@ Score against this rubric:
 Once you have your score, and before you return your final message, decide
 whether to queue the idea. **Score 6 or higher: call SubmitTradeIdea** with
 side "long" (this is a long-only strategy — never submit a short), your score,
-an allocation between 0.5% and 3%, a max entry price, and a thesis written in
-the trade-thesis format below. The max entry price is the validity ceiling —
-the highest price at which the thesis still clears your return bar, derived
-from your primary valuation anchor, not a wait-for-pullback target; the idea
-will not be executed above it. Choose the allocation independently rather than mapping it
+an allocation between 0.5% and 3%, and a thesis written in the trade-thesis
+format below. Price discipline belongs in the score, not in a separate entry
+ceiling: if the business is only ownable meaningfully below today's price, that
+is a 5 and you do not submit it. Anything you queue will be bought at the
+market on the next execution run.
+Choose the allocation independently rather than mapping it
 mechanically from the score: use your judgment about conviction, downside,
 uncertainty, cyclicality, and thesis fragility. **Score 5 or below: do not
 submit** — it is not yet ownable at this price. One idea per ticker.

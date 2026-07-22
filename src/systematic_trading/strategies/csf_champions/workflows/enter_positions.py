@@ -2,10 +2,12 @@
 
 Turns each draft holding into a whole-share marketable DAY limit order: sized
 as the holding's weight of the current account value, priced at the quoted ask
-plus a small buffer but never above the analyst's max entry price. FMP's
-consolidated price is the fallback base when the quote is missing or looks like
-feed flicker. Holdings that cannot be entered (no price, or a target too small
-for one whole share) are logged and skipped, never retried.
+plus a small buffer so it crosses and fills. There is no valuation ceiling: the
+book is meant to be fully invested, and the only price the strategy refuses is
+one the data says is wrong. FMP's consolidated price is the fallback base when
+the quote is missing or looks like feed flicker. Holdings that cannot be
+entered (no price, or a target too small for one whole share) are logged and
+skipped, never retried.
 
 In live/paper runs each submission is also recorded in the trade ledger with
 its full target quantity, and the broker order id is mapped to the ledger row
@@ -106,11 +108,9 @@ def entry_base_price(strategy: Strategy, ticker: str, anchor: float | None) -> f
     return choose_base_price(ask, anchor, ticker)
 
 
-def entry_limit_price(base_price: float, max_entry_price: float) -> float:
-    """Marketable limit for one entry, never above the analyst's max entry price."""
-    marketable = base_price * (1 + LIMIT_BUFFER_PCT / 100)
-
-    return round(min(marketable, max_entry_price), 2)
+def entry_limit_price(base_price: float) -> float:
+    """Marketable limit for one entry: the base price plus the crossing buffer."""
+    return round(base_price * (1 + LIMIT_BUFFER_PCT / 100), 2)
 
 
 def submit_entry(
@@ -119,7 +119,7 @@ def submit_entry(
     """Size and submit one whole-share limit buy; True if an order went out.
 
     The share count divides the dollar target by the limit price (not the base
-    price), so even a fill at the cap cannot overspend the holding's weight.
+    price), so even a fill at the limit cannot overspend the holding's weight.
     """
     base_price = entry_base_price(strategy, holding.ticker, anchor)
 
@@ -127,7 +127,7 @@ def submit_entry(
         log.warning("%s: no price available — skipping entry", holding.ticker)
         return False
 
-    limit_price = entry_limit_price(base_price, holding.max_entry_price)
+    limit_price = entry_limit_price(base_price)
 
     # A non-positive limit can only come from bad data; never size against it.
     if limit_price <= 0:
@@ -137,14 +137,6 @@ def submit_entry(
             limit_price,
         )
         return False
-
-    if base_price > holding.max_entry_price:
-        log.warning(
-            "%s: base price $%.2f is above max entry $%.2f — order may not fill",
-            holding.ticker,
-            base_price,
-            holding.max_entry_price,
-        )
 
     target_dollars = holding.weight_pct / 100 * account_value
     quantity = math.floor(target_dollars / limit_price)
@@ -181,7 +173,6 @@ def submit_entry(
                 side="buy",
                 target_quantity=quantity,
                 limit_price=limit_price,
-                max_entry_price=holding.max_entry_price,
                 submitted_at=strategy.get_datetime(),
             )
         )

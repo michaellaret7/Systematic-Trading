@@ -61,16 +61,6 @@ def submit_trade_idea(
             max_val=3.0,
         ),
     ],
-    max_entry_price: Annotated[
-        float,
-        Param(
-            description=(
-                "Validity ceiling for the idea: the highest entry price at which the "
-                "thesis still clears your return bar, justified off your primary "
-                "valuation anchor. The idea will not be executed above this price."
-            )
-        ),
-    ],
     thesis: Annotated[
         str,
         Param(
@@ -97,21 +87,10 @@ def submit_trade_idea(
     if not thesis.strip():
         return "error: thesis must not be empty"
 
-    if max_entry_price <= 0:
-        return "error: max_entry_price must be positive"
-
     reference_price = _latest_close(symbol)
 
     if reference_price is None:
         return f"error: no price data for ticker {symbol!r}; is the symbol correct?"
-
-    # A long idea whose ceiling is already below the market is stale on arrival.
-    if side == "long" and reference_price > max_entry_price:
-        return (
-            f"error: reference price ${reference_price:,.2f} is already above "
-            f"max_entry_price ${max_entry_price:,.2f}; the idea is not executable — "
-            "either raise the ceiling with justification or do not submit"
-        )
 
     idea_id = submit_idea(
         TradeIdea(
@@ -122,7 +101,6 @@ def submit_trade_idea(
             allocation_pct=allocation_pct,
             thesis=thesis.strip(),
             reference_price=reference_price,
-            max_entry_price=max_entry_price,
             model=_model,
             created_at=datetime.now(timezone.utc),
         )
@@ -130,6 +108,5 @@ def submit_trade_idea(
 
     return (
         f"recorded trade idea {idea_id}: {side} {symbol} at {allocation_pct}% of portfolio "
-        f"(reference price ${reference_price:,.2f}, max entry ${max_entry_price:,.2f}, "
-        "status: pending)"
+        f"(reference price ${reference_price:,.2f}, status: pending)"
     )

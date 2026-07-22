@@ -102,7 +102,6 @@ def record_order(order: TradeOrder) -> str:
             "filled_price": None,
             "filled_at": None,
             "limit_price": Decimal(str(order.limit_price)),
-            "max_entry_price": Decimal(str(order.max_entry_price)),
             "submitted_at": order.submitted_at.isoformat(),
             "paper": is_paper(),
         }

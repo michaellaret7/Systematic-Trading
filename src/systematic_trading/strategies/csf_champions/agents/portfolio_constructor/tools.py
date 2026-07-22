@@ -123,8 +123,8 @@ def _candidate_block(
 def view_portfolio(_portfolio: Portfolio) -> str:
     """
     Show the current draft portfolio: every holding with its side, conviction
-    score, weight, reference price, and max entry price, plus per-side weight
-    totals and any bench ideas already rejected this run.
+    score, weight, and reference price, plus per-side weight totals and any
+    bench ideas already rejected this run.
     """
     return _portfolio.summary()
 
@@ -135,8 +135,8 @@ def view_candidate_ideas(_bench: dict[str, Holding]) -> str:
     List the pending trade ideas that scored below the automatic seeding cut —
     the bench the portfolio can be expanded from. One line per idea: the
     analyst's side, conviction score, proposed weight, sector/industry, and
-    reference and max-entry prices, highest score first. Promotion removes an
-    idea from the bench, so everything listed is still available to add.
+    reference price, highest score first. Promotion removes an idea from the
+    bench, so everything listed is still available to add.
     """
     if not _bench:
         return "no candidate ideas remain on the bench"
@@ -147,7 +147,7 @@ def view_candidate_ideas(_bench: dict[str, Holding]) -> str:
         lines.append(
             f"{h.ticker} ({h.side}, score {h.score:.1f}, proposed {h.weight_pct:.2f}%, "
             f"{h.sector} / {h.industry}, "
-            f"ref ${h.reference_price:,.2f}, max entry ${h.max_entry_price:,.2f})"
+            f"ref ${h.reference_price:,.2f})"
         )
 
     return "\n".join(lines)

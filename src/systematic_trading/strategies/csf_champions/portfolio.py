@@ -36,7 +36,6 @@ class Holding:
     weight_pct: float
     thesis: str = field(repr=False)
     reference_price: float
-    max_entry_price: float
 
 
 class Portfolio:
@@ -95,7 +94,7 @@ class Portfolio:
             lines.append(
                 f"  {h.ticker:<6} {h.side:<5} score {h.score:>4.1f}  "
                 f"weight {h.weight_pct:>5.2f}%  ref ${h.reference_price:,.2f}  "
-                f"max entry ${h.max_entry_price:,.2f}  {h.sector} / {h.industry}"
+                f"{h.sector} / {h.industry}"
             )
 
         lines.append(f"total weight: {self.total_weight:.2f}%")

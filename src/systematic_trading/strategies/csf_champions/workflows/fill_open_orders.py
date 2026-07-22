@@ -105,7 +105,7 @@ def resubmit_remainder(strategy: Strategy, row: dict, remainder: int, anchor: fl
         log.warning("%s: no price available — leaving remainder for tomorrow", symbol)
         return False
 
-    limit_price = entry_limit_price(base_price, float(row["max_entry_price"]))
+    limit_price = entry_limit_price(base_price)
 
     if limit_price <= 0:
         log.warning("%s: computed limit price is not positive — skipping", symbol)

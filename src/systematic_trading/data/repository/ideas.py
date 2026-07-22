@@ -32,9 +32,6 @@ def submit_idea(idea: TradeIdea) -> str:
     ``allocation_pct`` is percent-of-portfolio (4.5 means 4.5%);
     ``reference_price`` is the price at submission time, recorded so idea
     quality can later be judged separately from execution quality.
-    ``max_entry_price`` is the validity ceiling: the highest entry price at
-    which the thesis still clears the return bar — the executor should not
-    fill a pending idea above it.
     """
     idea_id = f"{idea.created_at.isoformat()}#{idea.ticker}#{uuid4().hex[:8]}"
 
@@ -48,7 +45,6 @@ def submit_idea(idea: TradeIdea) -> str:
             "allocation_pct": Decimal(str(idea.allocation_pct)),
             "thesis": idea.thesis,
             "reference_price": Decimal(str(idea.reference_price)),
-            "max_entry_price": Decimal(str(idea.max_entry_price)),
             "created_at": idea.created_at.isoformat(),
             "model": idea.model,
             "status": "pending",

@@ -1,4 +1,4 @@
-﻿"""Typed domain records crossing the DynamoDB repository boundary."""
+"""Typed domain records crossing the DynamoDB repository boundary."""
 
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -42,7 +42,6 @@ def trade_idea() -> TradeIdea:
         allocation_pct=2.5,
         thesis="Durable returns on capital.",
         reference_price=200.0,
-        max_entry_price=220.0,
         model="test-model",
         created_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
     )
@@ -57,7 +56,6 @@ def trade_order() -> TradeOrder:
         side="buy",
         target_quantity=40,
         limit_price=201.0,
-        max_entry_price=220.0,
         submitted_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
     )
 

@@ -57,14 +57,16 @@ def test_no_usable_price_returns_none() -> None:
 
 
 def test_missing_reference_trusts_the_ask() -> None:
-    """With no anchor to judge against, the ask is all we have.
-
-    The limit is still capped at the analyst's max entry price downstream.
-    """
+    """With no anchor to judge against, the ask is all we have."""
     assert choose_base_price(ask=139.40, anchor=None, ticker="CRUS") == 139.40
 
 
-def test_limit_price_is_capped_at_max_entry() -> None:
-    """The marketable buffer never lifts the limit above the analyst's cap."""
-    assert entry_limit_price(100.0, max_entry_price=100.2) == 100.2
-    assert entry_limit_price(100.0, max_entry_price=220.0) == 100.5
+def test_limit_crosses_the_base_price() -> None:
+    """The limit sits above the base price so the order fills on submission.
+
+    ARLP and DAC on 2026-07-22 both failed to fill because a stale analyst cap
+    held their limits below the market. Nothing caps the limit now, so each
+    prices off what the stock is actually trading at.
+    """
+    assert entry_limit_price(24.82) == 24.94
+    assert entry_limit_price(132.95) == 133.61

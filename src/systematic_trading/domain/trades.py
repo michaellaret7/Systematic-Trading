@@ -11,10 +11,10 @@ class TradeOrder:
 
     ``target_quantity`` is the full intended position size; fills accumulate
     against it in the ledger, possibly across several trading days.
-    ``max_entry_price`` rides along so the morning re-submit job can recompute
-    a fresh limit price without needing the draft portfolio. ``idea_id`` links
-    back to the trade idea this order executes — the ledger row is the single
-    source of truth for that link.
+    ``limit_price`` is what this order was priced at; a re-submit prices itself
+    from the market at the time, so nothing else needs to ride along.
+    ``idea_id`` links back to the trade idea this order executes — the ledger
+    row is the single source of truth for that link.
     """
 
     strategy: str
@@ -23,7 +23,6 @@ class TradeOrder:
     side: str
     target_quantity: int
     limit_price: float
-    max_entry_price: float
     submitted_at: datetime
 
     def __post_init__(self) -> None:
@@ -45,9 +44,6 @@ class TradeOrder:
 
         if not isfinite(self.limit_price) or self.limit_price <= 0:
             raise ValueError("limit_price must be positive")
-
-        if not isfinite(self.max_entry_price) or self.max_entry_price <= 0:
-            raise ValueError("max_entry_price must be positive")
 
         if not isinstance(self.submitted_at, datetime):
             raise ValueError("submitted_at must be a datetime")

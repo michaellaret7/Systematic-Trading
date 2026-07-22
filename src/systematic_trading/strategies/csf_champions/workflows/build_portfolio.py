@@ -60,7 +60,6 @@ def seed_portfolio(portfolio: Portfolio, bench: dict[str, Holding]) -> tuple[int
             weight_pct=float(row["allocation_pct"]),
             thesis=row["thesis"],
             reference_price=float(row["reference_price"]),
-            max_entry_price=float(row["max_entry_price"]),
         )
 
         # If the idea has a score of over 7, we add it to the portfolio automatically
