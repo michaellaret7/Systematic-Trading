@@ -67,7 +67,7 @@ def analyze_candidate(symbol: str, name: str | None) -> None:
 
     agent.run(
         task,
-        sink=LogSink(f"ticker_analyst_{symbol}"),
+        sink=LogSink(f"analyst_{symbol}"),
     )
 
 

@@ -102,7 +102,7 @@ def construct_portfolio(portfolio: Portfolio) -> None:
         f"The draft portfolio has been seeded with {seeded} ideas at or above the conviction "
         f"cut; {benched} below-cut ideas are on the bench. Review the book, promote any bench "
         "names that earn a slot, and finalize the portfolio.",
-        sink=LogSink("portfolio_constructor"),
+        sink=LogSink("constructor"),
     )
 
     # Log the final portfolio summary
