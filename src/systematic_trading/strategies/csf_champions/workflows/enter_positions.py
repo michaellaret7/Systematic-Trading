@@ -123,12 +123,11 @@ def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> 
         return False
 
     order = strategy.create_order(
-        holding.ticker, 
-        quantity, 
-        "buy", 
-        limit_price=limit_price, 
+        holding.ticker,
+        quantity,
+        "buy",
+        limit_price=limit_price,
         time_in_force="day",
-        order_id=order.identifier
     )
 
     strategy.submit_order(order)
