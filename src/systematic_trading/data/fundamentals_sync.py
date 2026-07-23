@@ -89,7 +89,14 @@ def merge_statement(existing: pd.DataFrame, fresh: list[pd.DataFrame]) -> pd.Dat
     # pandas concat deprecates.
     aligned = [frame[existing.columns.intersection(frame.columns)] for frame in fresh]
 
-    combined = pd.concat([existing, *aligned], ignore_index=True)
+    # Exclude empty frames from the concat; pandas deprecates inferring dtypes
+    # from empty or all-NA entries.
+    parts = [frame for frame in (existing, *aligned) if not frame.empty]
+
+    if not parts:
+        return existing
+
+    combined = pd.concat(parts, ignore_index=True)
     combined = combined.drop_duplicates(subset=["symbol", "date"], keep="last")
 
     combined = combined.sort_values(["symbol", "date"], ignore_index=True)

@@ -38,6 +38,12 @@ _LOGGER_NAME = "systematic_trading"
 _LEVEL_WIDTH = 8
 _SOURCE_WIDTH = 20
 
+# Lumibot logs "Processing trade event ..." at INFO right before the "New order was
+# created"/"Order was filled" line that carries the same info with more detail. We can't
+# lower it at the source (Lumibot hard-codes INFO), so it is treated as a debug-only line:
+# hidden unless the app runs at DEBUG. Flipped by ``configure_logging``.
+_show_broker_plumbing = False
+
 _configured = False
 
 
@@ -81,6 +87,22 @@ class _NoiseFilter(logging.Filter):
         message = record.getMessage()
 
         return not any(noise in message for noise in NOISE_SUBSTRINGS)
+
+
+class _BrokerPlumbingFilter(logging.Filter):
+    """Drop Lumibot's redundant "Processing trade event" line unless running at DEBUG.
+
+    The line duplicates the "New order was created"/"Order was filled" record that follows
+    it. Lumibot hard-codes it at INFO, so it can't be lowered at the source; this filter
+    hides it by default and lets it through when ``_show_broker_plumbing`` is set (DEBUG),
+    making it effectively a debug-only line without silencing the rest of the broker channel.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if _show_broker_plumbing:
+            return True
+
+        return "Processing trade event" not in record.getMessage()
 
 
 class _RejectAll(logging.Filter):
@@ -157,7 +179,10 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
     and ``agent`` trees; the root stays at WARNING so unconfigured third-party loggers
     (httpx, botocore, ...) do not leak INFO.
     """
-    global _configured
+    global _configured, _show_broker_plumbing
+
+    # Broker plumbing lines surface only when the app runs at DEBUG.
+    _show_broker_plumbing = level <= logging.DEBUG
 
     # Force UTF-8 console output. On Windows the default cp1252 encoding chokes on
     # Lumibot's Unicode progress bar, which aborts backtests mid-run ("Could not
@@ -172,6 +197,7 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
         handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(_UnifiedFormatter())
         handler.addFilter(_NoiseFilter())
+        handler.addFilter(_BrokerPlumbingFilter())
 
         root_logger.addHandler(handler)
         _configured = True
