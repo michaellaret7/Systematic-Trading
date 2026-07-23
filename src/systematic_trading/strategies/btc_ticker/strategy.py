@@ -32,6 +32,10 @@ class BtcTicker(Strategy):
     }
 
     def initialize(self) -> None:
+        # Crypto trades around the clock; without this the strategy defaults to
+        # equity hours and sleeps until the stock market opens instead of ticking.
+        self.set_market("24/7")
+
         self.sleeptime = self.parameters["sleeptime"]
 
         # Crypto is quoted against a fiat asset; Alpaca serves BTC/USD.
