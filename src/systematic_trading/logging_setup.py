@@ -44,6 +44,12 @@ _SOURCE_WIDTH = 20
 # CloudWatch keeps the real-time + recent window; S3 is the permanent archive.
 _CLOUDWATCH_RETENTION_DAYS = 90
 
+# How often watchtower ships batched records to CloudWatch (seconds) — the delay
+# before a log line becomes visible to `aws logs tail` / `tail_cloudwatch_log`.
+# Lower = snappier real-time at the cost of more PutLogEvents calls; 60 is
+# watchtower's own default. A batch also flushes early when it fills.
+_CLOUDWATCH_SEND_INTERVAL_SECONDS = 30
+
 # Lumibot logs "Processing trade event ..." at INFO right before the "New order was
 # created"/"Order was filled" line that carries the same info with more detail. We can't
 # lower it at the source (Lumibot hard-codes INFO), so it is treated as a debug-only line:
@@ -228,6 +234,7 @@ def _attach_cloudwatch() -> None:
             log_stream_name=config["log_stream"],
             boto3_client=client,
             create_log_group=True,
+            send_interval=_CLOUDWATCH_SEND_INTERVAL_SECONDS,
         )
     except Exception as error:
         logging.getLogger(_LOGGER_NAME).warning(

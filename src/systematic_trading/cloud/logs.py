@@ -11,7 +11,8 @@ Three entry points, one per way to read:
 
 - ``read_s3_log`` — a pod's complete, permanent ``full.log`` from S3 (first line to last).
 - ``read_cloudwatch_log`` — a finite CloudWatch window (recent history, ≤ retention).
-- ``tail_cloudwatch_log`` — a live follow of CloudWatch as records arrive.
+- ``recent_cloudwatch_log`` — the last N records from the current run (like ``tail -n``).
+- ``tail_cloudwatch_log`` — a live follow, optionally after replaying recent history.
 
 Everything is a generator: lines are pulled and parsed one at a time, so a
 multi-gigabyte archive filters without loading into memory. Wrap in ``list(...)``
@@ -32,7 +33,13 @@ import boto3
 
 from systematic_trading.config import CLOUDWATCH_LOG_GROUP, aws_region, s3_bucket
 
-__all__ = ["LogEntry", "read_s3_log", "read_cloudwatch_log", "tail_cloudwatch_log"]
+__all__ = [
+    "LogEntry",
+    "read_s3_log",
+    "read_cloudwatch_log",
+    "recent_cloudwatch_log",
+    "tail_cloudwatch_log",
+]
 
 # A record opens with a wall-clock stamp; every other line continues the one above
 # it (a wrapped message or a traceback). Straight from the logging.md parser rule.
@@ -89,6 +96,30 @@ def _log_group_arn(group: str) -> str:
     account = boto3.client("sts", region_name=region).get_caller_identity()["Account"]
 
     return f"arn:aws:logs:{region}:{account}:log-group:{group}"
+
+
+def _recent_stream(group: str, stream_prefix: str | None) -> str | None:
+    """The newest log stream in ``group`` (matching ``stream_prefix``), or None if empty.
+
+    Streams are named ``<job>/<ISO-stamp>``, so ordering by name descending puts the
+    most recent pod first — the run you almost always want the tail of. Ordering by
+    ``LastEventTime`` is rejected alongside a prefix, which is why name order is used.
+    """
+    client = boto3.client("logs", region_name=aws_region())
+
+    kwargs: dict[str, object] = {
+        "logGroupName": group,
+        "orderBy": "LogStreamName",
+        "descending": True,
+        "limit": 1,
+    }
+
+    if stream_prefix is not None:
+        kwargs["logStreamNamePrefix"] = stream_prefix
+
+    streams = client.describe_log_streams(**kwargs)["logStreams"]
+
+    return streams[0]["logStreamName"] if streams else None
 
 
 #     ================================
@@ -208,11 +239,48 @@ def read_cloudwatch_log(
     return _filtered(parse_records(lines), level)
 
 
+def recent_cloudwatch_log(
+    limit: int = 200,
+    group: str = CLOUDWATCH_LOG_GROUP,
+    *,
+    level: str | None = None,
+    stream_prefix: str | None = None,
+) -> Iterator[LogEntry]:
+    """The most recent ``limit`` records from the newest matching stream — like ``tail -n``.
+
+    Reads one stream (the current/newest run) oldest-to-newest, so the output is in
+    order. ``limit`` counts events — the same unit CloudWatch and ``aws logs tail`` use;
+    most events are a single log record. Pair with ``tail_cloudwatch_log``'s ``history``
+    argument to get "recent context, then follow" in one call.
+    """
+    stream = _recent_stream(group, stream_prefix)
+
+    if stream is None:
+        return
+
+    client = boto3.client("logs", region_name=aws_region())
+
+    events = client.get_log_events(
+        logGroupName=group,
+        logStreamName=stream,
+        startFromHead=False,
+        limit=limit,
+    )["events"]
+
+    lines: list[str] = []
+
+    for event in events:
+        lines.extend(event["message"].splitlines())
+
+    yield from _filtered(parse_records(lines), level)
+
+
 def tail_cloudwatch_log(
     group: str = CLOUDWATCH_LOG_GROUP,
     *,
     level: str | None = None,
     stream_prefix: str | None = None,
+    history: int = 0,
     log_group_arn: str | None = None,
 ) -> Iterator[LogEntry]:
     """Yield records live as they land in CloudWatch — the real-time follow.
@@ -224,9 +292,17 @@ def tail_cloudwatch_log(
     hold-for-next-line latency. Live Tail is a billed feature — don't leave one running
     unattended.
 
+    ``history`` first replays that many recent records (from the newest stream) before
+    going live — the "show recent context, then stream" behaviour of ``aws logs tail
+    --follow``; a brief overlap or gap around the handoff is possible, as with the CLI.
     ``stream_prefix`` narrows to one pod; ``level`` keeps only that level;
     ``log_group_arn`` overrides the STS-derived ARN.
     """
+    if history:
+        yield from recent_cloudwatch_log(
+            history, group, level=level, stream_prefix=stream_prefix
+        )
+
     client = boto3.client("logs", region_name=aws_region())
 
     arn = log_group_arn or _log_group_arn(group)
