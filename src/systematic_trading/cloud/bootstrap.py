@@ -23,6 +23,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from systematic_trading.config import CLOUDWATCH_LOG_GROUP
+
 REPO_URL_TEMPLATE = "https://{auth}github.com/michaellaret7/Systematic-Trading.git"
 
 ENV_FILE = Path(__file__).parents[3] / ".env"
@@ -69,7 +71,7 @@ mem_report() {
 
 APT_SNIPPET = """
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq && apt-get install -y -qq git curl
+apt-get update -qq && apt-get install -y -qq git curl tzdata
 """
 
 
@@ -127,13 +129,81 @@ uv sync --no-dev --no-cache
 
 
 def log_sync_snippet(job_name: str) -> str:
-    """Start the run log, memory monitor, and 5-minute S3 sync loop."""
+    """Start the run log and memory monitor, and wire the S3 + CloudWatch targets.
+
+    **One cumulative S3 object per pod.** ``job.log`` only ever grows (``tee -a``),
+    so every ``upload_log`` replaces ``logs/<job_name>/<stamp>/full.log`` with the
+    whole log so far — the newest object is line 1 to the last upload. A fresh pod
+    gets a fresh ``<stamp>`` folder, so past pods' logs persist untouched.
+
+    ``cloudwatch.env`` carries the per-boot log group/stream to systemd-run
+    strategies (DigitalOcean), which read it via ``EnvironmentFile`` rather than
+    inheriting this shell's exports; inline runs (RunPod, and finite jobs) inherit
+    the exports directly. The Python handler attaches only when
+    ``CLOUDWATCH_LOG_GROUP`` is present, so this is what turns real-time streaming
+    on in the cloud.
+
+    This starts the log and the memory monitor but no upload loop — callers append
+    the cadence they want (``hourly_et_upload_snippet`` / ``periodic_upload_snippet``).
+    """
     return f"""
 STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
-upload_log() {{ uv run python -c "import os, boto3; boto3.client('s3').upload_file('/root/job.log', os.environ['S3_BUCKET'], 'logs/{job_name}/$STAMP.log')"; }}
+export S3_KEY="logs/{job_name}/$STAMP/full.log"
+
+export CLOUDWATCH_LOG_GROUP="{CLOUDWATCH_LOG_GROUP}"
+export CLOUDWATCH_LOG_STREAM="{job_name}/$STAMP"
+
+# Persist the per-boot CloudWatch target for systemd-run strategies, which read
+# it via EnvironmentFile rather than inheriting this shell's exports.
+cat > /root/cloudwatch.env <<CWEOF
+CLOUDWATCH_LOG_GROUP={CLOUDWATCH_LOG_GROUP}
+CLOUDWATCH_LOG_STREAM={job_name}/$STAMP
+CWEOF
+
+upload_log() {{ uv run python -c "import os, boto3; boto3.client('s3').upload_file('/root/job.log', os.environ['S3_BUCKET'], os.environ['S3_KEY'])"; }}
 : > /root/job.log
 {MONITOR_SNIPPET}
-( while true; do sleep 300; upload_log; done ) &
+"""
+
+
+def periodic_upload_snippet(interval_seconds: int = 300) -> str:
+    """Upload the run log to S3 on a fixed interval — for finite, self-deleting jobs.
+
+    Frequent uploads bound how much a crash or OOM can lose before the guaranteed
+    end-of-run upload; a short job that never completes an interval still gets that
+    final upload.
+    """
+    return f"""
+( while true; do sleep {interval_seconds}; upload_log; done ) &
+"""
+
+
+def hourly_et_upload_snippet() -> str:
+    """Upload the run log to S3 at the top of each hour, 10:00–17:00 America/New_York.
+
+    Eight uploads a trading day, DST-aware via ``TZ`` (``tzdata`` is installed in
+    ``APT_SNIPPET``). The loop sleeps to the next top-of-hour and uploads only
+    inside the window, so off-hours cost nothing. One cumulative object per pod
+    means each upload simply refreshes it (see ``log_sync_snippet``). Real-time
+    coverage between uploads comes from the CloudWatch stream.
+    """
+    return """
+# Top-of-hour S3 uploads during ET market hours (10:00-17:00, DST-aware). The
+# cumulative object is refreshed, not appended — see log_sync_snippet. `10#`
+# forces base-10 so a zero-padded hour like 09 is not read as octal.
+(
+    while true; do
+        now=$(date +%s)
+        next=$(( (now / 3600 + 1) * 3600 ))
+        sleep $(( next - now ))
+
+        hour=$((10#$(TZ=America/New_York date +%H)))
+
+        if [ "$hour" -ge 10 ] && [ "$hour" -le 17 ]; then
+            upload_log
+        fi
+    done
+) &
 """
 
 
@@ -200,6 +270,7 @@ def job_script(
 {preamble}
 {bootstrap_snippet(branch)}
 {log_sync_snippet(job_name)}
+{periodic_upload_snippet()}
 # `tee -a`, not `tee`: the memory monitor is appending to this same file, and a
 # truncating tee would overwrite its samples from offset 0.
 uv run python -m {job_module} 2>&1 | tee -a /root/job.log

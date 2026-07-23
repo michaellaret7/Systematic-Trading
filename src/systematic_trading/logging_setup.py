@@ -17,9 +17,12 @@ first ``LogSink`` is constructed. It is idempotent.
 
 from __future__ import annotations
 
+import atexit
 import io
 import logging
 import sys
+
+from systematic_trading.config import cloudwatch_config
 
 # Non-actionable framework warnings we don't want cluttering the console.
 NOISE_SUBSTRINGS: tuple[str, ...] = (
@@ -38,6 +41,9 @@ _LOGGER_NAME = "systematic_trading"
 _LEVEL_WIDTH = 8
 _SOURCE_WIDTH = 20
 
+# CloudWatch keeps the real-time + recent window; S3 is the permanent archive.
+_CLOUDWATCH_RETENTION_DAYS = 90
+
 # Lumibot logs "Processing trade event ..." at INFO right before the "New order was
 # created"/"Order was filled" line that carries the same info with more detail. We can't
 # lower it at the source (Lumibot hard-codes INFO), so it is treated as a debug-only line:
@@ -45,6 +51,7 @@ _SOURCE_WIDTH = 20
 _show_broker_plumbing = False
 
 _configured = False
+_cloudwatch_attached = False
 
 
 #     ================================
@@ -64,7 +71,7 @@ def _source(name: str) -> str:
     # line is obvious at a glance (`agent.constructor` -> `constructor_agent`). The full
     # remainder is used, not the last segment, so dotted tickers survive (`BRK.B`).
     if segments[0] == "agent" and len(segments) >= 2:
-        return f"{name[len('agent.'):]}_agent"
+        return f"{name[len('agent.') :]}_agent"
 
     last = segments[-1]
 
@@ -103,6 +110,22 @@ class _BrokerPlumbingFilter(logging.Filter):
             return True
 
         return "Processing trade event" not in record.getMessage()
+
+
+class _ExcludeAwsChatter(logging.Filter):
+    """Drop AWS-SDK records so the CloudWatch handler can't feed back into itself.
+
+    Watchtower ships log events over botocore/urllib3, which log through the root
+    logger too. On the CloudWatch handler their records would trigger more shipping
+    calls — an amplifying loop. Root sits at WARNING so most never fire, but a
+    single retry WARNING is enough, so this filter lives on the CloudWatch handler
+    only (the console still shows a genuine boto warning).
+    """
+
+    _PREFIXES = ("botocore", "boto3", "urllib3", "s3transfer", "watchtower")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith(self._PREFIXES)
 
 
 class _RejectAll(logging.Filter):
@@ -166,6 +189,77 @@ def _repair_agent_tree(level: int) -> None:
     agent_logger.propagate = True
 
 
+def _attach_cloudwatch() -> None:
+    """Add a second root handler that streams every record to CloudWatch Logs.
+
+    Opt-in and idempotent: does nothing unless ``cloudwatch_config()`` is set
+    (cloud runs export it; local runs stay stdout-only). Reuses ``_UnifiedFormatter``
+    so a CloudWatch line is byte-for-byte the console line, and carries the same
+    noise/broker filters plus ``_ExcludeAwsChatter`` to break the shipping feedback
+    loop. ``boto3`` and ``watchtower`` are imported lazily so the local and data
+    paths never pay for them.
+
+    Failure is swallowed to stdout-only: a logging handler must never take the
+    strategy down, and a credentials or IAM gap should degrade, not crash.
+    """
+    global _cloudwatch_attached
+
+    if _cloudwatch_attached:
+        return
+
+    config = cloudwatch_config()
+
+    if config is None:
+        return
+
+    try:
+        import boto3
+        import watchtower
+
+        client = boto3.client("logs", region_name=config["region"])
+
+        # No ``log_group_retention_days`` here on purpose: watchtower sets retention
+        # inside this constructor, where a denied ``logs:PutRetentionPolicy`` would
+        # raise and disable streaming entirely. Retention is set separately below so
+        # it can fail quietly. ``create_log_group`` still creates the group + stream,
+        # which is all streaming needs.
+        handler = watchtower.CloudWatchLogHandler(
+            log_group_name=config["log_group"],
+            log_stream_name=config["log_stream"],
+            boto3_client=client,
+            create_log_group=True,
+        )
+    except Exception as error:
+        logging.getLogger(_LOGGER_NAME).warning(
+            "CloudWatch logging disabled — falling back to stdout only: %s", error
+        )
+        return
+
+    handler.setFormatter(_UnifiedFormatter())
+    handler.addFilter(_NoiseFilter())
+    handler.addFilter(_BrokerPlumbingFilter())
+    handler.addFilter(_ExcludeAwsChatter())
+
+    logging.getLogger().addHandler(handler)
+
+    # Flush the background queue before exit so the last events reach CloudWatch.
+    atexit.register(handler.flush)
+
+    # Best-effort retention: the group already exists (created above), so this just
+    # sets its expiry. A missing ``logs:PutRetentionPolicy`` permission leaves the
+    # group at its default and logs a debug line — streaming is already live.
+    try:
+        client.put_retention_policy(
+            logGroupName=config["log_group"], retentionInDays=_CLOUDWATCH_RETENTION_DAYS
+        )
+    except Exception as error:
+        logging.getLogger(_LOGGER_NAME).debug(
+            "CloudWatch retention not set (streaming unaffected): %s", error
+        )
+
+    _cloudwatch_attached = True
+
+
 #     ================================
 # --> Public API
 #     ================================
@@ -211,6 +305,7 @@ def configure_logging(level: int = logging.INFO) -> logging.Logger:
 
     _repair_agent_tree(level)
     _mute_lumibot_handlers()
+    _attach_cloudwatch()
 
     return app_logger
 

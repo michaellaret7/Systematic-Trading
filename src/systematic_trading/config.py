@@ -16,6 +16,12 @@ from dotenv import load_dotenv
 # always win over .env values (override=False), which is what we want in CI/prod.
 load_dotenv(override=False)
 
+# The one CloudWatch Logs group the whole system streams to. The cloud bootstrap
+# sets it as an env var on each pod, and the log reader defaults to it. Distinct
+# from the ``CLOUDWATCH_LOG_GROUP`` env var read below: this is the canonical name;
+# the env var is the runtime opt-in switch (absent -> stdout only).
+CLOUDWATCH_LOG_GROUP = "systematic-trading"
+
 
 def _require(name: str) -> str:
     value = os.getenv(name)
@@ -62,6 +68,27 @@ def s3_bucket() -> str:
     ``load_dotenv`` has run — only the bucket name needs an accessor.
     """
     return _require("S3_BUCKET")
+
+
+def cloudwatch_config() -> dict[str, str] | None:
+    """CloudWatch Logs target for the unified logger, or ``None`` when unset.
+
+    Opt-in: returns ``None`` unless ``CLOUDWATCH_LOG_GROUP`` is present, so local
+    runs stay stdout-only while cloud runs — which export it in the pod bootstrap —
+    stream in real time. The stream name defaults to ``local`` for an ad-hoc run
+    that sets only the group. AWS credentials and region use botocore's standard
+    variables, already loaded by ``load_dotenv``.
+    """
+    group = os.getenv("CLOUDWATCH_LOG_GROUP")
+
+    if not group:
+        return None
+
+    return {
+        "log_group": group,
+        "log_stream": os.getenv("CLOUDWATCH_LOG_STREAM", "local"),
+        "region": aws_region(),
+    }
 
 
 def is_paper() -> bool:

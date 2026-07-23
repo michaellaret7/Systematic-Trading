@@ -18,6 +18,7 @@ dependencies = [
     "requests>=2.31",
     "s3fs>=2026.6.0",
     "torch>=2.12.1",
+    "watchtower>=3.4.0",
 ]
 
 [project.scripts]
