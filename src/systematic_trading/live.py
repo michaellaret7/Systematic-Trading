@@ -23,7 +23,7 @@ from lumibot.traders import Trader
 
 from systematic_trading.cloud.runpod import launch_strategy_pod
 from systematic_trading.config import alpaca_config, is_paper
-from systematic_trading.logging_setup import configure_logging
+from systematic_trading.logging_setup import configure_logging, get_logger
 from systematic_trading.strategies import STRATEGIES
 
 TARGETS = ("local", "cloud")
@@ -75,7 +75,8 @@ def run_cloud(strategy_names: list[str], log: logging.Logger) -> None:
 
 def main() -> None:
     args = parse_args()
-    log = configure_logging()
+    configure_logging()
+    log = get_logger("live")
 
     if args.target == "cloud":
         run_cloud(args.strategies, log)

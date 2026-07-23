@@ -19,7 +19,7 @@ from datetime import datetime
 from lumibot.backtesting import AlpacaBacktesting
 
 from systematic_trading.config import alpaca_config
-from systematic_trading.logging_setup import configure_logging
+from systematic_trading.logging_setup import configure_logging, get_logger
 from systematic_trading.strategies import STRATEGIES
 
 DEFAULT_START = "2018-01-01"
@@ -67,7 +67,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    log = configure_logging()
+    configure_logging()
+    log = get_logger("backtest")
 
     for name in args.strategies:
         strategy = STRATEGIES[name]
