@@ -8,8 +8,9 @@ Reads prices/daily_ohclv.parquet, pulls only what is missing, and rewrites it:
   history, so symbols with a split inside the gap are re-fetched in full.
 - New symbols: panel symbols absent from the file are backfilled in full.
 
-The window rolls forward: rows older than YEARS_OF_HISTORY are dropped, so
-the file always spans the trailing 4 years. Rerunning on an up-to-date file
+The file is append-only: nothing is ever trimmed off the back, so history
+accumulates from the day the file was seeded. Full re-pulls (splits, new
+symbols) span that whole stored history. Rerunning on an up-to-date file
 is a no-op.
 
 Usage:
@@ -22,7 +23,7 @@ import datetime as dt
 
 import pandas as pd
 
-from systematic_trading.data.price_sync import YEARS_OF_HISTORY, fetch_symbols
+from systematic_trading.data.price_sync import fetch_symbols
 from systematic_trading.data.providers.fmp import FMPClient
 from systematic_trading.data.repository import (
     daily_prices_uri,
@@ -61,9 +62,9 @@ def main() -> None:
 
     existing = load_daily_prices()
     last_date = existing["date"].max().date()
+    history_start = existing["date"].min().date()
 
     today = dt.date.today()
-    window_start = today - dt.timedelta(days=YEARS_OF_HISTORY * 365)
     gap_start = last_date + dt.timedelta(days=1)
 
     known = set(existing["symbol"].unique())
@@ -90,7 +91,7 @@ def main() -> None:
         failures.extend(gap_failures)
 
     if full_pull:
-        full_frames, full_failures = fetch_symbols(client, full_pull, window_start, today, "full")
+        full_frames, full_failures = fetch_symbols(client, full_pull, history_start, today, "full")
         frames.extend(full_frames)
         failures.extend(full_failures)
 
@@ -99,7 +100,6 @@ def main() -> None:
     combined = pd.concat(frames, ignore_index=True)
     combined = combined.drop_duplicates(["symbol", "date"], keep="last")
 
-    combined = combined[combined["date"] >= pd.Timestamp(window_start)]
     combined = combined.sort_values(["symbol", "date"], ignore_index=True)
 
     added = len(combined) - len(existing)
