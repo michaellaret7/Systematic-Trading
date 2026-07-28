@@ -55,7 +55,7 @@ def split_symbols(client: FMPClient, start: dt.date, end: dt.date) -> set[str]:
 #     ================================
 
 
-def main() -> None:
+def update_daily_prices() -> None:
     client = FMPClient()
     symbols = panel_symbols()
     uri = daily_prices_uri()
@@ -120,4 +120,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    update_daily_prices()
