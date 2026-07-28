@@ -21,7 +21,7 @@ import sys
 from lumibot.brokers import Alpaca
 from lumibot.traders import Trader
 
-from systematic_trading.cloud.runpod import launch_strategy_pod
+from systematic_trading.cloud.digitalocean import launch_strategy_droplet
 from systematic_trading.config import alpaca_config, is_paper
 from systematic_trading.logging_setup import configure_logging, get_logger
 from systematic_trading.strategies import STRATEGIES
@@ -31,11 +31,6 @@ TARGETS = ("local", "cloud")
 #     ================================
 # --> Helper funcs
 #     ================================
-
-# Create runpod or Digital Ocean or Render pod using code and launch trading strategies from here.
-# Create the infrastructure for this
-# refer to launch trade ideas pod
-# Another Note: create resuseable cloud deployment of strategies class
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,11 +61,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_cloud(strategy_names: list[str], log: logging.Logger) -> None:
-    """Launch one run-forever RunPod pod per strategy and return."""
+    """Launch one run-forever DigitalOcean droplet per strategy and return."""
     for name in strategy_names:
-        pod_id = launch_strategy_pod(name)
+        droplet_id = launch_strategy_droplet(name)
 
-        log.info("launched | %s on RunPod pod %s", name, pod_id)
+        log.info("launched | %s on DigitalOcean droplet %s", name, droplet_id)
 
 
 def main() -> None:

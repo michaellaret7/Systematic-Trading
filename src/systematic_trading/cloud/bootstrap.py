@@ -1,9 +1,9 @@
 """Provider-agnostic pieces of a cloud run: .env forwarding and start-script bash.
 
 Nothing here knows about RunPod or DigitalOcean. Every launcher renders the
-same lifecycle — install uv, check out the repo, start the log sync and memory
-monitor, run the work, upload the log, delete the machine — and only the
-provider API and the machine's own identity differ.
+same lifecycle — install uv, check out the repo, start the log shipper and
+memory monitor, run the work, delete the machine — and only the provider API
+and the machine's own identity differ.
 
 The bash lives here because it encodes safety rails learned from real
 incidents: container-aware memory sampling (an OOM must leave evidence), the
@@ -12,8 +12,14 @@ the retried self-delete (one fire-and-forget DELETE leaves a machine billing).
 Duplicating those per provider means a fix reaches one launcher and silently
 misses the other.
 
+Logs stream to CloudWatch Logs rather than syncing to S3. The agent tails
+``/root/job.log`` and ships only new lines, so a run-forever strategy no longer
+re-uploads a growing file every five minutes, and a machine torn down mid-run
+has already shipped its tail.
+
 Requires ``GITHUB_TOKEN`` in the forwarded environment while the repo is
-private, and ``S3_BUCKET`` for the log sync.
+private, and ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` /
+``AWS_DEFAULT_REGION`` for log shipping.
 """
 
 from __future__ import annotations
@@ -62,14 +68,66 @@ mem_report() {
     echo "$(date -u +%H:%M:%S) MEM  $budget  oom_kills=${oom:-?}  disk=$(df -h / | awk 'NR==2 {print $5}')  procs=$(ps -e --no-headers | wc -l)"
 }
 
-# Appends straight to the log so the samples ride along to S3, and so sampling
-# outlives the Python process — the last line before a kill is the evidence.
+# Appends straight to the log so the samples ride along to CloudWatch, and so
+# sampling outlives the Python process — the last line before a kill is the
+# evidence.
 ( while true; do mem_report >> /root/job.log; sleep 30; done ) &
 """
 
 APT_SNIPPET = """
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq && apt-get install -y -qq git curl
+"""
+
+# Kept out of the f-strings below because the agent config is JSON and every
+# brace would need doubling. Reads $JOB_NAME and $STAMP from the caller's shell
+# instead, so no Python substitution happens in here at all.
+#
+# `onPremise`, not `ec2`: these machines are DigitalOcean droplets and RunPod
+# containers, so there is no instance metadata service to identify them and the
+# agent must take static credentials from a shared credentials file.
+CLOUDWATCH_SNIPPET = """
+curl -sSLo /tmp/cwagent.deb https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+dpkg -i -E /tmp/cwagent.deb
+
+mkdir -p /root/.aws
+cat > /root/.aws/credentials <<EOF
+[AmazonCloudWatchAgent]
+aws_access_key_id = $AWS_ACCESS_KEY_ID
+aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
+EOF
+
+cat > /opt/aws/amazon-cloudwatch-agent/etc/common-config.toml <<EOF
+[credentials]
+  shared_credential_file = "/root/.aws/credentials"
+EOF
+
+# retention_in_days is set by the agent when it creates the group, so retention
+# is declared here rather than provisioned separately. A year outlives any
+# question worth asking of a run log and then expires on its own.
+cat > /opt/aws/amazon-cloudwatch-agent/etc/config.json <<EOF
+{
+  "agent": { "region": "$AWS_DEFAULT_REGION" },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/root/job.log",
+            "log_group_name": "/systematic-trading/$JOB_NAME",
+            "log_stream_name": "$STAMP",
+            "retention_in_days": 365
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+    -a fetch-config -m onPremise -s \
+    -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 """
 
 
@@ -127,13 +185,18 @@ uv sync --no-dev --no-cache
 
 
 def log_sync_snippet(job_name: str) -> str:
-    """Start the run log, memory monitor, and 5-minute S3 sync loop."""
+    """Start the run log, memory monitor, and CloudWatch log shipper.
+
+    The log group is ``/systematic-trading/<job_name>`` and each (re)start gets
+    its own timestamped stream, so one group holds every run of a job and
+    Logs Insights can query across all of them.
+    """
     return f"""
+JOB_NAME={job_name}
 STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
-upload_log() {{ uv run python -c "import os, boto3; boto3.client('s3').upload_file('/root/job.log', os.environ['S3_BUCKET'], 'logs/{job_name}/$STAMP.log')"; }}
 : > /root/job.log
 {MONITOR_SNIPPET}
-( while true; do sleep 300; upload_log; done ) &
+{CLOUDWATCH_SNIPPET}
 """
 
 
@@ -184,10 +247,10 @@ def job_script(
     self_delete: str,
     preamble: str = "",
 ) -> str:
-    """Render the finite-job lifecycle: bootstrap, run, upload, self-delete.
+    """Render the finite-job lifecycle: bootstrap, run, self-delete.
 
-    Plain sequencing (no ``set -e``): the log upload and self-delete must run
-    even when an earlier step fails.
+    Plain sequencing (no ``set -e``): the self-delete must run even when an
+    earlier step fails.
 
     ``self_delete`` is the function definition from ``self_delete_snippet``.
     ``preamble`` is provider setup that runs after that definition and before
@@ -204,10 +267,8 @@ def job_script(
 # truncating tee would overwrite its samples from offset 0.
 uv run python -m {job_module} 2>&1 | tee -a /root/job.log
 
-upload_log
-
-# Best-effort second upload: it carries the self-delete evidence but loses the
-# race if the machine is torn down first, so the run log is already safe above.
+# The agent ships continuously, so the run log is already in CloudWatch by the
+# time this runs. The self-delete evidence is best-effort: it loses the race if
+# the machine is torn down before the agent's next flush.
 self_delete 2>&1 | tee -a /root/job.log
-upload_log
 """

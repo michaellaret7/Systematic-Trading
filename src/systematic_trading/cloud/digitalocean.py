@@ -2,12 +2,12 @@
 
 ``launch_job_droplet()`` runs a finite job: the droplet clones the repo,
 installs dependencies with uv, runs the given job module via ``python -m``,
-syncs the run log to ``s3://<S3_BUCKET>/logs/<job_name>/<utc-stamp>.log`` every
-five minutes (and once more at the end), and then destroys itself — on success
-or failure — so billing stops automatically.
+streams the run log to the ``/systematic-trading/<job_name>`` CloudWatch log
+group, and then destroys itself — on success or failure — so billing stops
+automatically.
 
 ``launch_strategy_droplet()`` runs a live strategy forever: same bootstrap and
-log sync, but the strategy runs under a systemd unit with ``Restart=always``,
+log shipping, but the strategy runs under a systemd unit with ``Restart=always``,
 so a crash relaunches it in place and a droplet reboot brings it back. The
 droplet bills until ``stop_droplet()`` — or the DO console — destroys it.
 
@@ -28,7 +28,6 @@ private) in the environment / .env alongside the usual job credentials.
 
 from __future__ import annotations
 
-import os
 import shlex
 
 import requests
@@ -130,11 +129,7 @@ def create_droplet(name: str, script: str, size: str, region: str, image: str) -
     droplet_id = response.json()["droplet"]["id"]
 
     print(f"Droplet {droplet_id} ({name}) launched — safe to shut this machine down.")
-    print(
-        "Log syncs to s3://"
-        + os.environ["S3_BUCKET"]
-        + f"/logs/{name}/ every 5 minutes and once more per run."
-    )
+    print(f"Logs stream to CloudWatch: aws logs tail /systematic-trading/{name} --follow")
 
     return droplet_id
 
@@ -172,7 +167,7 @@ EnvironmentFile={ENV_PATH}
 ExecStart=/bin/bash -lc 'uv run live {strategy_name} 2>&1 | tee -a /root/job.log'
 Restart=always
 # Damp a crash loop: an instantly-crashing strategy would otherwise cycle as
-# fast as systemd can restart it, flooding S3 with log files.
+# fast as systemd can restart it, flooding CloudWatch with log streams.
 RestartSec=60
 
 [Install]
@@ -200,8 +195,9 @@ def launch_job_droplet(
 ) -> int:
     """Create a self-destroying droplet running ``python -m job_module``.
 
-    ``job_name`` names the droplet in the DO console and the S3 log folder
-    (``logs/<job_name>/``). The run continues cloud-side after this returns.
+    ``job_name`` names the droplet in the DO console and the CloudWatch log
+    group (``/systematic-trading/<job_name>``). The run continues cloud-side
+    after this returns.
 
     No run-once guard is needed here: cloud-init runs user_data once per
     droplet, unlike RunPod's start script which re-runs on every container
@@ -230,7 +226,8 @@ def launch_strategy_droplet(
 
     The droplet bills until ``stop_droplet()`` or the DO console destroys it.
     Paper/live is decided by ``ALPACA_PAPER`` in the forwarded .env — this
-    launcher never overrides it. Logs land in ``logs/live_<strategy_name>/``.
+    launcher never overrides it. Logs stream to the
+    ``/systematic-trading/live_<strategy_name>`` CloudWatch log group.
     """
     job_name = f"live_{strategy_name}"
     script = strategy_user_data(job_name, strategy_name, branch)

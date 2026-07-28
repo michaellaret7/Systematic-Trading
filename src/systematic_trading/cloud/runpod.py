@@ -1,13 +1,12 @@
 """Launch RunPod CPU pods that run our workloads, in one of two lifecycles.
 
 ``launch_job_pod()`` runs a finite job: the pod clones the repo, installs
-dependencies with uv, runs the given job module via ``python -m``, syncs the
-run log to ``s3://<S3_BUCKET>/logs/<job_name>/<utc-stamp>.log`` every five
-minutes (and once more at the end), and then deletes itself — on success or
-failure — so billing stops automatically.
+dependencies with uv, runs the given job module via ``python -m``, streams the
+run log to the ``/systematic-trading/<job_name>`` CloudWatch log group, and
+then deletes itself — on success or failure — so billing stops automatically.
 
 ``launch_strategy_pod()`` runs a live strategy forever: same bootstrap and log
-sync, but no run-once guard and no self-delete. If the strategy process exits,
+shipping, but no run-once guard and no self-delete. If the strategy process exits,
 the container restart relaunches it (restart = recovery). The pod bills until
 ``stop_pod()`` — or the RunPod console — deletes it.
 
@@ -27,7 +26,6 @@ in the environment / .env alongside the usual job credentials.
 
 from __future__ import annotations
 
-import os
 
 import requests
 from dotenv import load_dotenv
@@ -122,11 +120,7 @@ def create_pod(
     pod_id = response.json().get("id")
 
     print(f"Pod {pod_id} ({name}) launched — safe to shut this machine down.")
-    print(
-        "Log syncs to s3://"
-        + os.environ["S3_BUCKET"]
-        + f"/logs/{name}/ every 5 minutes and once more per run."
-    )
+    print(f"Logs stream to CloudWatch: aws logs tail /systematic-trading/{name} --follow")
 
     return pod_id
 
@@ -141,7 +135,7 @@ def strategy_script(job_name: str, strategy_name: str, branch: str) -> str:
 
     No run-once guard and no self-delete: when the strategy process exits, this
     script ends, RunPod restarts the container, and the restart relaunches the
-    strategy. Each (re)start gets its own timestamped S3 log.
+    strategy. Each (re)start gets its own timestamped CloudWatch log stream.
     """
     return f"""
 {APT_SNIPPET}
@@ -156,10 +150,9 @@ echo "run #$((restarts + 1)) of strategy {strategy_name} starting" | tee -a /roo
 uv run live {strategy_name} 2>&1 | tee -a /root/job.log
 
 echo "strategy process exited — container restart will relaunch it" | tee -a /root/job.log
-upload_log
 
 # Damp a crash loop: an instantly-crashing strategy would otherwise cycle the
-# container as fast as RunPod can restart it, flooding S3 with log files.
+# container as fast as RunPod can restart it, flooding CloudWatch with streams.
 sleep 60
 """
 
@@ -180,8 +173,9 @@ def launch_job_pod(
 ) -> str:
     """Create a self-deleting pod running ``python -m job_module`` and return its id.
 
-    ``job_name`` names the pod in the RunPod console and the S3 log folder
-    (``logs/<job_name>/``). The run continues cloud-side after this returns.
+    ``job_name`` names the pod in the RunPod console and the CloudWatch log
+    group (``/systematic-trading/<job_name>``). The run continues cloud-side
+    after this returns.
     """
     script = job_script(
         job_name,
@@ -206,7 +200,8 @@ def launch_strategy_pod(
 
     The pod bills until ``stop_pod()`` — or the RunPod console — deletes it.
     Paper/live is decided by ``ALPACA_PAPER`` in the forwarded .env — this
-    launcher never overrides it. Logs land in ``logs/live_<strategy_name>/``.
+    launcher never overrides it. Logs stream to the
+    ``/systematic-trading/live_<strategy_name>`` CloudWatch log group.
     """
     job_name = f"live_{strategy_name}"
     script = strategy_script(job_name, strategy_name, branch)
