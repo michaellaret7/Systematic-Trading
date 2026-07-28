@@ -53,8 +53,9 @@ DO_API = "https://api.digitalocean.com/v2"
 
 # Droplet size. Slugs and live pricing come from ``GET /v2/sizes`` — `s-` is
 # basic shared-CPU, `g-` general purpose (4 GB/vCPU), `c-` CPU-optimized
-# (2 GB/vCPU). g-4vcpu-16gb matches the RunPod cpu3g pod at vcpuCount=4.
-DEFAULT_SIZE = "g-4vcpu-16gb"
+# (2 GB/vCPU). The `g-`/`c-` classes are gated behind an account-tier increase
+# (422 "size is currently restricted"), so we stay on basic shared-CPU.
+DEFAULT_SIZE = "s-4vcpu-8gb"
 DEFAULT_REGION = "nyc3"
 
 # Ubuntu 24.04 matches the RunPod base image, so the shared bootstrap applies
