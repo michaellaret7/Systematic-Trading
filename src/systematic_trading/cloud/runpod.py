@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 
 from systematic_trading.cloud.bootstrap import (
     APT_SNIPPET,
+    CAPTURE_SNIPPET,
     bootstrap_snippet,
     env_pairs,
     hourly_et_upload_snippet,
@@ -145,19 +146,19 @@ def strategy_script(job_name: str, strategy_name: str, branch: str) -> str:
     strategy. Each (re)start gets its own timestamped S3 log.
     """
     return f"""
+{CAPTURE_SNIPPET}
 {APT_SNIPPET}
 {bootstrap_snippet(branch)}
 {log_sync_snippet(job_name)}
 {hourly_et_upload_snippet()}
 restarts=$(cat /root/.restarts 2>/dev/null || echo 0)
 echo "$((restarts + 1))" > /root/.restarts
-echo "run #$((restarts + 1)) of strategy {strategy_name} starting" | tee -a /root/job.log
+echo "run #$((restarts + 1)) of strategy {strategy_name} starting"
 
-# `tee -a`, not `tee`: the memory monitor is appending to this same file, and a
-# truncating tee would overwrite its samples from offset 0.
-uv run live {strategy_name} 2>&1 | tee -a /root/job.log
+# No pipes needed: CAPTURE_SNIPPET already tees this whole script's output.
+uv run live {strategy_name}
 
-echo "strategy process exited — container restart will relaunch it" | tee -a /root/job.log
+echo "strategy process exited — container restart will relaunch it"
 upload_log
 
 # Damp a crash loop: an instantly-crashing strategy would otherwise cycle the

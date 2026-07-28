@@ -23,7 +23,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from systematic_trading.config import CLOUDWATCH_LOG_GROUP
+from systematic_trading.config import CLOUDWATCH_JOB_LOG_GROUP, CLOUDWATCH_LOG_GROUP
 
 REPO_URL_TEMPLATE = "https://{auth}github.com/michaellaret7/Systematic-Trading.git"
 
@@ -69,9 +69,27 @@ mem_report() {
 ( while true; do mem_report >> /root/job.log; sleep 30; done ) &
 """
 
+# Must be the first thing every start script runs. Until 2026-07-28 the run log
+# was created *after* the repo checkout, so apt, uv, git clone and `uv sync`
+# wrote only to the provider's own console — which dies with the machine. Five
+# job droplets failed inside `uv sync` and left no evidence anywhere.
+#
+# `exec > >(tee -a ...)` redirects the whole rest of the script, so every later
+# command is captured without needing its own pipe. `tee -a`, never `tee`: the
+# memory monitor appends to this same file.
+CAPTURE_SNIPPET = """
+: > /root/job.log
+exec > >(tee -a /root/job.log) 2>&1
+echo "=== boot $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+"""
+
 APT_SNIPPET = """
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq && apt-get install -y -qq git curl tzdata
+# awscli is here, not in the project venv, on purpose: it is what uploads the
+# run log, and a log upload that runs through `uv` dies with the very
+# environment it exists to report on. Five job droplets failed silently that
+# way on 2026-07-28 — the postmortem must not share a fate with the patient.
+apt-get update -qq && apt-get install -y -qq git curl awscli tzdata
 """
 
 
@@ -128,7 +146,7 @@ uv sync --no-dev --no-cache
 """
 
 
-def log_sync_snippet(job_name: str) -> str:
+def log_sync_snippet(job_name: str, *, group: str = CLOUDWATCH_LOG_GROUP) -> str:
     """Start the run log and memory monitor, and wire the S3 + CloudWatch targets.
 
     **One cumulative S3 object per pod.** ``job.log`` only ever grows (``tee -a``),
@@ -150,18 +168,19 @@ def log_sync_snippet(job_name: str) -> str:
 STAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
 export S3_KEY="logs/{job_name}/$STAMP/full.log"
 
-export CLOUDWATCH_LOG_GROUP="{CLOUDWATCH_LOG_GROUP}"
+export CLOUDWATCH_LOG_GROUP="{group}"
 export CLOUDWATCH_LOG_STREAM="{job_name}/$STAMP"
 
 # Persist the per-boot CloudWatch target for systemd-run strategies, which read
 # it via EnvironmentFile rather than inheriting this shell's exports.
 cat > /root/cloudwatch.env <<CWEOF
-CLOUDWATCH_LOG_GROUP={CLOUDWATCH_LOG_GROUP}
+CLOUDWATCH_LOG_GROUP={group}
 CLOUDWATCH_LOG_STREAM={job_name}/$STAMP
 CWEOF
 
-upload_log() {{ uv run python -c "import os, boto3; boto3.client('s3').upload_file('/root/job.log', os.environ['S3_BUCKET'], os.environ['S3_KEY'])"; }}
-: > /root/job.log
+# `aws`, not `uv run python`: see APT_SNIPPET. This must work even when the
+# project venv does not, because that is exactly when the log matters most.
+upload_log() {{ aws s3 cp /root/job.log "s3://$S3_BUCKET/$S3_KEY" --only-show-errors || echo "upload_log FAILED (rc=$?)"; }}
 {MONITOR_SNIPPET}
 """
 
@@ -265,20 +284,28 @@ def job_script(
     re-run on providers that restart the script.
     """
     return f"""#!/bin/bash
+{CAPTURE_SNIPPET}
 {APT_SNIPPET}
 {self_delete}
 {preamble}
 {bootstrap_snippet(branch)}
-{log_sync_snippet(job_name)}
+{log_sync_snippet(job_name, group=CLOUDWATCH_JOB_LOG_GROUP)}
+
+# Upload before the job runs. Everything above — apt, clone, `uv sync` — is the
+# part that used to fail invisibly, so its log must reach S3 whether or not the
+# job itself ever starts.
+echo "=== bootstrap complete, starting {job_module} ==="
+upload_log
+
 {periodic_upload_snippet()}
-# `tee -a`, not `tee`: the memory monitor is appending to this same file, and a
-# truncating tee would overwrite its samples from offset 0.
-uv run python -m {job_module} 2>&1 | tee -a /root/job.log
+# No pipe needed: CAPTURE_SNIPPET already tees this script's whole output.
+uv run python -m {job_module}
+echo "=== job exited rc=$? ==="
 
 upload_log
 
 # Best-effort second upload: it carries the self-delete evidence but loses the
 # race if the machine is torn down first, so the run log is already safe above.
-self_delete 2>&1 | tee -a /root/job.log
+self_delete
 upload_log
 """

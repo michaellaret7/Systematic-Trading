@@ -40,6 +40,7 @@ from dotenv import load_dotenv
 
 from systematic_trading.cloud.bootstrap import (
     APT_SNIPPET,
+    CAPTURE_SNIPPET,
     bootstrap_snippet,
     env_pairs,
     hourly_et_upload_snippet,
@@ -169,6 +170,7 @@ def strategy_user_data(job_name: str, strategy_name: str, branch: str) -> str:
     droplet, so a reboot would otherwise leave nothing to restart the strategy.
     """
     return f"""#!/bin/bash
+{CAPTURE_SNIPPET}
 {APT_SNIPPET}
 {env_snippet()}
 {bootstrap_snippet(branch)}

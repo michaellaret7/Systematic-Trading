@@ -16,11 +16,17 @@ from dotenv import load_dotenv
 # always win over .env values (override=False), which is what we want in CI/prod.
 load_dotenv(override=False)
 
-# The one CloudWatch Logs group the whole system streams to. The cloud bootstrap
-# sets it as an env var on each pod, and the log reader defaults to it. Distinct
-# from the ``CLOUDWATCH_LOG_GROUP`` env var read below: this is the canonical name;
-# the env var is the runtime opt-in switch (absent -> stdout only).
+# The CloudWatch Logs groups the system streams to. The cloud bootstrap sets the
+# right one as an env var on each machine, and the log reader defaults to the
+# strategy group. Distinct from the ``CLOUDWATCH_LOG_GROUP`` env var read below:
+# these are the canonical names; the env var is the runtime opt-in switch
+# (absent -> stdout only).
+#
+# Strategies and jobs are split so a long-lived strategy's stream is not buried
+# under one stream per job run — a job launched daily would otherwise dominate
+# the group it shares with the thing you actually watch.
 CLOUDWATCH_LOG_GROUP = "systematic-trading"
+CLOUDWATCH_JOB_LOG_GROUP = "systematic-trading/jobs"
 
 
 def _require(name: str) -> str:
