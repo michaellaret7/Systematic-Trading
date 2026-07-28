@@ -10,7 +10,7 @@ a fresh instance per construction run rather than sharing a singleton.
 from agent_harness.agent import Agent
 from agent_harness.decorator import bind_tool
 
-from systematic_trading.agents.tools.correlations import get_price_correlations
+from systematic_trading.agents.shared_tools.correlations import get_price_correlations
 from systematic_trading.strategies.csf_champions.agents.portfolio_constructor.prompt import SYSTEM
 from systematic_trading.strategies.csf_champions.agents.portfolio_constructor.tools import (
     add_position,

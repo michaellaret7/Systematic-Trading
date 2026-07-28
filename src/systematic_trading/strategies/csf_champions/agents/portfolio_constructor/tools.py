@@ -14,7 +14,7 @@ import pandas as pd
 import yaml
 from agent_harness.decorator import Param, agent_tool
 
-from systematic_trading.agents.tools.correlations import MIN_OBSERVATIONS, daily_returns
+from systematic_trading.agents.shared_tools.correlations import MIN_OBSERVATIONS, daily_returns
 from systematic_trading.strategies.csf_champions.portfolio import (
     ALLOCATION_CAP_PCT,
     ALLOCATION_FLOOR_PCT,

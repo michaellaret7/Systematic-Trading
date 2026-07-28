@@ -12,9 +12,9 @@ runner must construct a fresh Agent per ticker rather than reusing this one.
 from agent_harness.agent import Agent
 from agent_harness.decorator import bind_tool
 
-from systematic_trading.agents.tools.fundamentals import get_fundamental_statement
-from systematic_trading.agents.tools.prices import get_recent_prices
-from systematic_trading.agents.tools.trade_ideas import submit_trade_idea
+from systematic_trading.agents.shared_tools.fundamentals import get_fundamental_statement
+from systematic_trading.agents.shared_tools.prices import get_recent_prices
+from systematic_trading.agents.shared_tools.trade_ideas import submit_trade_idea
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.prompt import SYSTEM
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.subagents.management import (
     MANAGEMENT_SUBAGENT_CONFIG,

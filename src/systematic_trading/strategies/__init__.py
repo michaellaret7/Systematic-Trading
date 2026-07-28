@@ -9,12 +9,14 @@ backtest, paper, and live — only the broker/data-source wiring in the runner
 
 from typing import Any
 
+from systematic_trading.strategies.btc_ticker.strategy import BtcTicker
 from systematic_trading.strategies.csf_champions.strategy import CsfChampions
 
 StrategyType = type[Any]
 
 STRATEGIES: dict[str, StrategyType] = {
     "csf_champions": CsfChampions,
+    "btc_ticker": BtcTicker,
 }
 
 __all__ = ["STRATEGIES"]

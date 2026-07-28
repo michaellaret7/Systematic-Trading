@@ -206,15 +206,60 @@ and `scripts/` without booting the framework.
 - `configure_logging()` — idempotent; wires root, repairs `agent`, filters lumibot
 - `get_logger()` — unchanged
 
+## Transport
+
+Two independent channels carry the same formatted lines, each doing what it is best at.
+The formatter is destination-independent, so neither changes the record format.
+
+```
+                            ┌─> stdout ─> host tee ─> /root/job.log ─> S3 (archive)
+root handler(s) ── record ──┤
+                            └─> CloudWatch Logs (real-time subscribe)
+```
+
+**S3 — the permanent archive, one cumulative file per pod.** The host pipes stdout to
+`/root/job.log` (`tee -a`, append-only), and `upload_log` copies that file to
+`s3://<bucket>/logs/<job_name>/<boot-stamp>/full.log`. Because the file only grows, each
+upload replaces the object with the whole log so far — the newest object is line 1 to the
+last upload. A fresh pod gets a fresh `<boot-stamp>` folder, so past pods persist
+untouched. This is the only channel that also carries the memory-monitor samples and the
+pre-Python bootstrap output. Cadence: finite jobs upload every 5 min (crash-safety); live
+strategies upload at the top of each hour, 10:00–17:00 America/New_York (DST-aware, 8×/day)
+— `cloud/bootstrap.py:hourly_et_upload_snippet`.
+
+**CloudWatch — real-time subscribe.** A second root handler (`watchtower`) streams every
+record to the `systematic-trading` log group, stream `<job_name>/<boot-stamp>`. Subscribe
+with `aws logs tail systematic-trading --follow` (add `--log-stream-name-prefix
+live_<strategy>` for one strategy). Retention is 90 days; S3 is the long-term store.
+
+- **Opt-in.** `configure_logging()` attaches it only when `cloudwatch_config()` returns a
+  target, i.e. when `CLOUDWATCH_LOG_GROUP` is set. Local runs stay stdout-only; the cloud
+  bootstrap exports the var (and writes `/root/cloudwatch.env` for the systemd-run DO
+  strategy, which does not inherit the shell's exports).
+- **No feedback loop.** watchtower ships events over botocore/urllib3, which log to root.
+  `_ExcludeAwsChatter` on the CloudWatch handler drops those records so a shipping call
+  can't trigger more shipping calls.
+- **Fail-safe.** Handler construction is wrapped: a credentials or IAM gap logs one warning
+  and falls back to stdout-only rather than taking the strategy down.
+- **Not a double-print.** The doc's earlier caveat was about a second *stdout* handler; the
+  CloudWatch handler writes to a different sink, so each record still prints to the console
+  exactly once.
+
+**IAM.** Streaming needs `logs:CreateLogGroup`, `logs:CreateLogStream`, and
+`logs:PutLogEvents` on the `systematic-trading` group (plus the existing `s3:PutObject`
+for the archive). `logs:PutRetentionPolicy` is **optional**: retention is set best-effort
+*after* the handler is live (`logging_setup._attach_cloudwatch`), so a denial leaves the
+group at its default expiry and logs a debug line rather than disabling streaming — which
+is why it is not set inside watchtower's constructor, where it would raise and take the
+handler down.
+
+**ANSI caveat still stands.** lumibot's `colored()` output (`broker.py:2620`) carries ANSI
+codes when stdout is a tty; in the cloud stdout is piped, so this does not fire there, and
+CloudWatch would store the codes harmlessly if it ever did.
+
 ## Future
 
 **Structured agent events.** `turn.end` flattens real data into prose
 (`in=706259 out=12116 cached=623043 cost=$1.1064`). Our own `Sink` against
 `agent_harness`'s 16-method protocol would emit those as fields via `extra={…}`. Worth
 doing when something consumes cost per run.
-
-**Transport.** The formatter is independent of destination, so an S3 or pub-sub handler
-needs no format change — the point of settling this first. Two caveats when that lands:
-lumibot's `colored()` output (`broker.py:2620`) carries ANSI codes whenever stdout is a
-tty, and a *second* root handler will double-print lumibot records, since lumibot forces
-`propagate = True` on its own logger while our trees will have it too.

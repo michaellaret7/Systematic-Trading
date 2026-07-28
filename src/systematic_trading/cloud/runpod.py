@@ -1,14 +1,17 @@
 """Launch RunPod CPU pods that run our workloads, in one of two lifecycles.
 
 ``launch_job_pod()`` runs a finite job: the pod clones the repo, installs
-dependencies with uv, runs the given job module via ``python -m``, streams the
-run log to the ``/systematic-trading/<job_name>`` CloudWatch log group, and
-then deletes itself — on success or failure — so billing stops automatically.
+dependencies with uv, runs the given job module via ``python -m``, syncs one
+cumulative run log to ``s3://<S3_BUCKET>/logs/<job_name>/<stamp>/full.log`` every
+five minutes (and once more at the end), streams live to CloudWatch, and then
+deletes itself — on success or failure — so billing stops automatically.
 
-``launch_strategy_pod()`` runs a live strategy forever: same bootstrap and log
-shipping, but no run-once guard and no self-delete. If the strategy process exits,
-the container restart relaunches it (restart = recovery). The pod bills until
-``stop_pod()`` — or the RunPod console — deletes it.
+``launch_strategy_pod()`` runs a live strategy forever: same bootstrap and
+CloudWatch stream, but the S3 archive uploads at the top of each hour during ET
+market hours (10:00-17:00), and there is no run-once guard and no self-delete. If
+the strategy process exits, the container restart relaunches it (restart =
+recovery) under a fresh ``<stamp>`` folder. The pod bills until ``stop_pod()`` —
+or the RunPod console — deletes it.
 
 Either launch call returns in seconds; the run continues in RunPod's cloud
 with no connection to this machine.
@@ -21,11 +24,9 @@ Requires ``RUNPOD_API_KEY`` (and ``GITHUB_TOKEN`` while the repo is private)
 in the environment / .env alongside the usual job credentials.
 """
 
-# Build live pub sub logging infrastructure
-# Anyone can subscribe to the pub output from the pod and log it
-
 from __future__ import annotations
 
+import os
 
 import requests
 from dotenv import load_dotenv
@@ -34,11 +35,13 @@ from systematic_trading.cloud.bootstrap import (
     APT_SNIPPET,
     bootstrap_snippet,
     env_pairs,
+    hourly_et_upload_snippet,
     job_script,
     log_sync_snippet,
     require,
     self_delete_snippet,
 )
+from systematic_trading.config import CLOUDWATCH_LOG_GROUP
 
 RUNPOD_API = "https://rest.runpod.io/v1"
 
@@ -120,7 +123,11 @@ def create_pod(
     pod_id = response.json().get("id")
 
     print(f"Pod {pod_id} ({name}) launched — safe to shut this machine down.")
-    print(f"Logs stream to CloudWatch: aws logs tail /systematic-trading/{name} --follow")
+    print(
+        f"Logs -> s3://{os.environ['S3_BUCKET']}/logs/{name}/<stamp>/full.log "
+        f"and CloudWatch group '{CLOUDWATCH_LOG_GROUP}'.\n"
+        f"Tail live: aws logs tail {CLOUDWATCH_LOG_GROUP} --follow --log-stream-name-prefix {name}"
+    )
 
     return pod_id
 
@@ -135,12 +142,13 @@ def strategy_script(job_name: str, strategy_name: str, branch: str) -> str:
 
     No run-once guard and no self-delete: when the strategy process exits, this
     script ends, RunPod restarts the container, and the restart relaunches the
-    strategy. Each (re)start gets its own timestamped CloudWatch log stream.
+    strategy. Each (re)start gets its own timestamped S3 log.
     """
     return f"""
 {APT_SNIPPET}
 {bootstrap_snippet(branch)}
 {log_sync_snippet(job_name)}
+{hourly_et_upload_snippet()}
 restarts=$(cat /root/.restarts 2>/dev/null || echo 0)
 echo "$((restarts + 1))" > /root/.restarts
 echo "run #$((restarts + 1)) of strategy {strategy_name} starting" | tee -a /root/job.log
@@ -150,9 +158,10 @@ echo "run #$((restarts + 1)) of strategy {strategy_name} starting" | tee -a /roo
 uv run live {strategy_name} 2>&1 | tee -a /root/job.log
 
 echo "strategy process exited — container restart will relaunch it" | tee -a /root/job.log
+upload_log
 
 # Damp a crash loop: an instantly-crashing strategy would otherwise cycle the
-# container as fast as RunPod can restart it, flooding CloudWatch with streams.
+# container as fast as RunPod can restart it, flooding S3 with log files.
 sleep 60
 """
 
@@ -173,9 +182,8 @@ def launch_job_pod(
 ) -> str:
     """Create a self-deleting pod running ``python -m job_module`` and return its id.
 
-    ``job_name`` names the pod in the RunPod console and the CloudWatch log
-    group (``/systematic-trading/<job_name>``). The run continues cloud-side
-    after this returns.
+    ``job_name`` names the pod in the RunPod console and the S3 log folder
+    (``logs/<job_name>/``). The run continues cloud-side after this returns.
     """
     script = job_script(
         job_name,
@@ -200,8 +208,7 @@ def launch_strategy_pod(
 
     The pod bills until ``stop_pod()`` — or the RunPod console — deletes it.
     Paper/live is decided by ``ALPACA_PAPER`` in the forwarded .env — this
-    launcher never overrides it. Logs stream to the
-    ``/systematic-trading/live_<strategy_name>`` CloudWatch log group.
+    launcher never overrides it. Logs land in ``logs/live_<strategy_name>/``.
     """
     job_name = f"live_{strategy_name}"
     script = strategy_script(job_name, strategy_name, branch)
