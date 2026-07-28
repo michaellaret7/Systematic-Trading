@@ -32,6 +32,7 @@ private) in the environment / .env alongside the usual job credentials.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 
 import requests
@@ -107,12 +108,21 @@ chmod 600 {ENV_PATH}
 """
 
 
+def hostname(name: str) -> str:
+    """Convert a job name to a legal droplet hostname (a-z, A-Z, 0-9, `.`, `-`).
+
+    Our job names use underscores (``live_btc_ticker``); DigitalOcean rejects
+    them. Only the hostname is rewritten — log paths keep the original name.
+    """
+    return re.sub(r"[^a-zA-Z0-9.-]", "-", name)
+
+
 def create_droplet(name: str, script: str, size: str, region: str, image: str) -> int:
     """POST the droplet to DigitalOcean and return its id."""
     load_dotenv(override=False)
 
     payload = {
-        "name": name,
+        "name": hostname(name),
         "region": region,
         "size": size,
         "image": image,
