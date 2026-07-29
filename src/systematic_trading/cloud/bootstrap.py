@@ -85,11 +85,19 @@ echo "=== boot $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 APT_SNIPPET = """
 export DEBIAN_FRONTEND=noninteractive
-# awscli is here, not in the project venv, on purpose: it is what uploads the
-# run log, and a log upload that runs through `uv` dies with the very
-# environment it exists to report on. Five job droplets failed silently that
-# way on 2026-07-28 — the postmortem must not share a fate with the patient.
-apt-get update -qq && apt-get install -y -qq git curl awscli tzdata
+apt-get update -qq && apt-get install -y -qq git curl unzip tzdata
+
+# The AWS CLI is installed from Amazon's own bundle, not apt: Ubuntu 24.04 has
+# no `awscli` candidate ("E: Package 'awscli' has no installation candidate"),
+# and it must not come from the project venv either — it is what uploads the run
+# log, and a log upload that runs through `uv` dies with the very environment it
+# exists to report on. Five job droplets failed silently that way on 2026-07-28.
+if ! command -v aws >/dev/null; then
+    curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+    unzip -q /tmp/awscliv2.zip -d /tmp
+    /tmp/aws/install --update
+fi
+echo "aws=$(command -v aws || echo MISSING)"
 """
 
 
@@ -133,8 +141,16 @@ def env_pairs(required: str) -> dict[str, str]:
 def bootstrap_snippet(branch: str) -> str:
     """Install uv and check out the repo, safely re-runnable on a restart."""
     return f"""
+# cloud-init executes user_data with HOME *unset*. uv's installer still writes to
+# /root/.local/bin, but `. "$HOME/.local/bin/env"` then sources `/.local/bin/env`,
+# which does not exist — so uv never reaches PATH and every later `uv` call dies
+# with "command not found". That killed five job droplets silently on 2026-07-28:
+# `uv sync` failed, the job never ran, and the log upload (which also went through
+# `uv`) failed too, so nothing reached S3, CloudWatch, or Langfuse. Set HOME first
+# and put the bin dir on PATH directly; do not trust the generated env script.
+export HOME="${{HOME:-/root}}"
 curl -LsSf https://astral.sh/uv/install.sh | sh
-. "$HOME/.local/bin/env"
+export PATH="$HOME/.local/bin:$PATH"
 
 # Idempotent: a container restart re-runs the start script with the container
 # disk intact, so the clone must not fail on an existing checkout.
