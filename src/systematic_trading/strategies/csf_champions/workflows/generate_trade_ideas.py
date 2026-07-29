@@ -27,9 +27,8 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.agent imp
 )
 from systematic_trading.strategies.csf_champions.screening import screen
 
-# change this back to 200 and 85 after experiment is run
-TOP_N = 20
-TARGET_IDEAS = 10
+TOP_N = 200
+TARGET_IDEAS = 85
 MAX_WORKERS = 7
 
 # Universe listings for the symbol -> company-name map. The floor sits below the

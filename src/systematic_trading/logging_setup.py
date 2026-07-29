@@ -48,7 +48,7 @@ _CLOUDWATCH_RETENTION_DAYS = 90
 # before a log line becomes visible to `aws logs tail` / `tail_cloudwatch_log`.
 # Lower = snappier real-time at the cost of more PutLogEvents calls; 60 is
 # watchtower's own default. A batch also flushes early when it fills.
-_CLOUDWATCH_SEND_INTERVAL_SECONDS = 30
+_CLOUDWATCH_SEND_INTERVAL_SECONDS = 10
 
 # Lumibot logs "Processing trade event ..." at INFO right before the "New order was
 # created"/"Order was filled" line that carries the same info with more detail. We can't

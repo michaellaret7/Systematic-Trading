@@ -27,7 +27,7 @@ from systematic_trading.strategies.csf_champions.agents.ticker_analyst.subagents
 )
 
 STRATEGY = "csf_champions"
-MODEL = "deepseek/deepseek-v4-flash"
+MODEL = "openai/gpt-5.6-sol"
 
 
 def build_ticker_analyst() -> Agent:

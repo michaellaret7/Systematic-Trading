@@ -132,5 +132,5 @@ MOAT_SUBAGENT_CONFIG = SubAgentConfig(
     system=SYSTEM,
     tools=(),
     provider="openrouter",
-    model="deepseek/deepseek-v4-flash",
+    model="z-ai/glm-5.2",
 )

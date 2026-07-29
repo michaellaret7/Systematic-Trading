@@ -1,4 +1,9 @@
-from systematic_trading.cloud.logs import tail_cloudwatch_log, read_s3_log
+from systematic_trading.cloud.logs import tail_cloudwatch_log
+from systematic_trading.config import CLOUDWATCH_JOB_LOG_GROUP
 
-tail_cloudwatch_log(stream_prefix="live_csf_champions", history=50)
-read_s3_log("logs/live_csf_champions/2026-07-23T14Z/full.log")
+for record in tail_cloudwatch_log(
+    CLOUDWATCH_JOB_LOG_GROUP,
+    stream_prefix="generate_trade_ideas",
+    history=50,
+):
+    print(record)
