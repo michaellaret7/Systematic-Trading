@@ -49,7 +49,7 @@ from systematic_trading.cloud.bootstrap import (
     require,
     self_delete_snippet,
 )
-from systematic_trading.config import CLOUDWATCH_LOG_GROUP
+from systematic_trading.config import CLOUDWATCH_JOB_LOG_GROUP, CLOUDWATCH_LOG_GROUP
 
 DO_API = "https://api.digitalocean.com/v2"
 
@@ -118,8 +118,21 @@ def hostname(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9.-]", "-", name)
 
 
-def create_droplet(name: str, script: str, size: str, region: str, image: str) -> int:
-    """POST the droplet to DigitalOcean and return its id."""
+def create_droplet(
+    name: str,
+    script: str,
+    size: str,
+    region: str,
+    image: str,
+    log_group: str = CLOUDWATCH_LOG_GROUP,
+) -> int:
+    """POST the droplet to DigitalOcean and return its id.
+
+    ``log_group`` only shapes the printed tail command — the script's own
+    exports decide where logs actually go. It is a parameter so the two do not
+    drift: jobs stream to a different group than strategies, and a hardcoded
+    name here printed a command that tailed an empty group.
+    """
     load_dotenv(override=False)
 
     payload = {
@@ -149,8 +162,8 @@ def create_droplet(name: str, script: str, size: str, region: str, image: str) -
     print(f"Droplet {droplet_id} ({name}) launched — safe to shut this machine down.")
     print(
         f"Logs -> s3://{os.environ['S3_BUCKET']}/logs/{name}/<stamp>/full.log "
-        f"and CloudWatch group '{CLOUDWATCH_LOG_GROUP}'.\n"
-        f"Tail live: aws logs tail {CLOUDWATCH_LOG_GROUP} --follow --log-stream-name-prefix {name}"
+        f"and CloudWatch group '{log_group}'.\n"
+        f"Tail live: aws logs tail {log_group} --follow --log-stream-name-prefix {name}"
     )
 
     return droplet_id
@@ -237,7 +250,7 @@ def launch_job_droplet(
         preamble=env_snippet(),
     )
 
-    return create_droplet(job_name, script, size, region, image)
+    return create_droplet(job_name, script, size, region, image, CLOUDWATCH_JOB_LOG_GROUP)
 
 
 def launch_strategy_droplet(
