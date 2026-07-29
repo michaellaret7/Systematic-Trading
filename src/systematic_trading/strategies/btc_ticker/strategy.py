@@ -1,10 +1,9 @@
-"""A minimal live strategy that streams BTC/USD prices via Alpaca and logs each one.
+"""A minimal live strategy that buys Bitcoin, then logs account and BTC data.
 
-Not a trading strategy — it never submits an order. Its only job is to exercise the
-logging pipeline end to end: every iteration fetches the latest BTC price and logs it on
-the ``systematic_trading`` tree, so the line flows through the unified handler to stdout,
-to CloudWatch (real-time), and into the S3 archive. Use it to confirm a live deployment's
-logging works without touching the market.
+On startup it submits a market order for 0.001 BTC. Every iteration then fetches the BTC
+position, portfolio details, and latest BTC price and logs them on the ``systematic_trading``
+tree, so the lines flow through the unified handler to stdout, to CloudWatch (real-time),
+and into the S3 archive.
 
 Run it live (paper by default) with::
 
@@ -21,12 +20,13 @@ log = get_logger(__name__)
 
 
 class BtcTicker(Strategy):
-    """Logs the BTC/USD price every iteration — a read-only logging smoke test."""
+    """Buys Bitcoin, then logs account and BTC data every iteration."""
 
     WARM_UP_TRADING_DAYS = 0
 
     parameters = {
         "symbol": "BTC",
+        "quantity": 0.001,
         # Crypto trades 24/7, so a short heartbeat keeps the log lively.
         "sleeptime": "30S",
     }
@@ -44,14 +44,41 @@ class BtcTicker(Strategy):
 
         self.ticks = 0
 
+        order = self.create_order(
+            self.base,
+            self.parameters["quantity"],
+            "buy",
+            quote=self.quote,
+            order_type="market",
+            time_in_force="gtc",
+        )
+        self.submit_order(order)
+
         log.info(
-            "BTC ticker online — streaming %s/USD every %s (no orders placed)",
+            "BTC ticker online — submitted %g BTC market order; streaming %s/USD every %s",
+            self.parameters["quantity"],
             self.parameters["symbol"],
             self.sleeptime,
         )
 
     def on_trading_iteration(self) -> None:
         self.ticks += 1
+
+        btc_position = self.get_position(self.base)
+
+        if btc_position:
+            position_info = btc_position.to_minimal_dict()
+            cost_basis = abs(btc_position.quantity * btc_position.avg_fill_price)
+            position_info["pnl_pct"] = round(float(btc_position.pnl) / cost_basis * 100, 2)
+        else:
+            position_info = "none"
+
+        log.info(
+            "BTC position: %s | portfolio value: $%.2f | cash: $%.2f",
+            position_info,
+            float(self.get_portfolio_value()),
+            float(self.get_cash()),
+        )
 
         price = self.get_last_price(self.base, quote=self.quote)
 

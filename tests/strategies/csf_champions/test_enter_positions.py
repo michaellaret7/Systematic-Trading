@@ -1,72 +1,134 @@
-"""Entry pricing guards against the quote data Alpaca actually returns.
+"""CSF Champions market-entry workflow."""
 
-The numbers below are real observations from the 2026-07-22 paper run, where
-the broker's single-venue (IEX) feed disagreed with the consolidated market in
-both directions: stale last trades on thin names, and asks parked 13-15% above
-the real price.
-"""
+from datetime import datetime, timezone
+from typing import Any
 
-from systematic_trading.strategies.csf_champions.workflows.enter_positions import (
-    choose_base_price,
-    entry_limit_price,
-)
+import pytest
+
+from systematic_trading.domain.trades import TradeOrder
+from systematic_trading.strategies.csf_champions.portfolio import Holding, Portfolio
+from systematic_trading.strategies.csf_champions.workflows import enter_positions as entries
 
 
-def test_sane_ask_is_used_directly() -> None:
-    """A live ask close to the reference is the base price.
+class FakeOrder:
+    """One broker order created by the fake strategy."""
 
-    CRUS on 2026-07-22: ask $139.40 against a $139.30 consolidated price.
-    """
-    assert choose_base_price(ask=139.40, anchor=139.30, ticker="CRUS") == 139.40
-
-
-def test_anchor_quality_decides_the_outcome() -> None:
-    """The same ask resolves differently depending on the anchor it is judged against.
-
-    LAUR on 2026-07-22 is the regression this rewrite fixed. Its ask ($35.68)
-    tracked the real $35.60 market, but the broker's single-venue last trade sat
-    stale at $33.16 — so anchoring on that stale print rejected a good ask and
-    priced the order 6% below the market, where it never filled.
-
-    The guard itself was never wrong; it was being fed a bad anchor.
-    """
-    assert choose_base_price(ask=35.68, anchor=33.16, ticker="LAUR") == 33.16
-    assert choose_base_price(ask=35.68, anchor=35.60, ticker="LAUR") == 35.68
+    def __init__(self, symbol: str) -> None:
+        self.symbol = symbol
 
 
-def test_zero_ask_falls_back_to_reference() -> None:
-    """Alpaca reports 'no quote' as ask=0.0 — must not become a $0 limit.
+class FakeStrategy:
+    """Capture market-order construction and submission without a broker."""
 
-    VEON on 2026-07-22 had no IEX offer at all while trading near $53.86.
-    """
-    assert choose_base_price(ask=0.0, anchor=53.86, ticker="VEON") == 53.86
+    def __init__(self, last_price: float | None = 100.0) -> None:
+        self.is_backtesting = False
+        self.portfolio_value = 100_000.0
+        self.trade_ids_by_symbol: dict[str, str] = {}
+        self.last_price = last_price
+        self.created: list[dict[str, Any]] = []
+        self.submitted: list[FakeOrder] = []
+        self.idea_is_executed = False
+
+    def get_last_price(self, symbol: str) -> float | None:
+        """Return the configured sizing price."""
+        return self.last_price
+
+    def create_order(
+        self,
+        symbol: str,
+        quantity: int,
+        side: str,
+        **kwargs: Any,
+    ) -> FakeOrder:
+        """Capture the order request."""
+        self.created.append(
+            {
+                "symbol": symbol,
+                "quantity": quantity,
+                "side": side,
+                **kwargs,
+            }
+        )
+
+        return FakeOrder(symbol)
+
+    def submit_order(self, order: FakeOrder) -> None:
+        """Verify the ledger mapping exists before the fast market submission."""
+        assert order.symbol in self.trade_ids_by_symbol
+        assert self.idea_is_executed
+        self.submitted.append(order)
+
+    def get_datetime(self) -> datetime:
+        """Return a stable strategy timestamp."""
+        return datetime(2026, 7, 30, 9, 30, tzinfo=timezone.utc)
 
 
-def test_flickery_ask_falls_back_to_reference() -> None:
-    """An ask far above the consolidated price is treated as feed flicker.
+def portfolio() -> Portfolio:
+    """One long holding ready for market entry."""
+    result = Portfolio()
+    result.add(
+        Holding(
+            idea_id="idea-aapl",
+            ticker="AAPL",
+            sector="Technology",
+            industry="Hardware",
+            side="long",
+            score=8.5,
+            weight_pct=2.0,
+            thesis="Durable returns.",
+            reference_price=99.0,
+        )
+    )
 
-    CBT on 2026-07-22: a $103.13 IEX ask while the stock traded at $90.04.
-    """
-    assert choose_base_price(ask=103.13, anchor=90.04, ticker="CBT") == 90.04
+    return result
 
 
-def test_no_usable_price_returns_none() -> None:
-    """Zero or missing on both sources means no entry, not a bad number."""
-    assert choose_base_price(ask=0.0, anchor=0.0, ticker="AAPL") is None
-    assert choose_base_price(ask=None, anchor=None, ticker="AAPL") is None
+def test_enter_positions_submits_market_order_after_registering_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The simple live flow sizes, records, maps, submits, and marks executed."""
+    strategy = FakeStrategy(last_price=100.0)
+    recorded: list[TradeOrder] = []
+    status_updates: list[tuple[str, str, str]] = []
+
+    def fake_record_order(order: TradeOrder) -> str:
+        recorded.append(order)
+        return "trade-aapl"
+
+    def fake_update_idea_status(strategy_name: str, idea_id: str, status: str) -> None:
+        status_updates.append((strategy_name, idea_id, status))
+        strategy.idea_is_executed = status == "executed"
+
+    monkeypatch.setattr(entries, "record_order", fake_record_order)
+    monkeypatch.setattr(entries, "update_idea_status", fake_update_idea_status)
+
+    entries.enter_positions(strategy, portfolio())
+
+    assert strategy.created == [
+        {
+            "symbol": "AAPL",
+            "quantity": 20,
+            "side": "buy",
+            "order_type": "market",
+            "time_in_force": "day",
+        }
+    ]
+    assert len(strategy.submitted) == 1
+    assert strategy.trade_ids_by_symbol == {"AAPL": "trade-aapl"}
+    assert recorded[0].target_quantity == 20
+    assert status_updates == [("csf_champions", "idea-aapl", "executed")]
 
 
-def test_missing_reference_trusts_the_ask() -> None:
-    """With no anchor to judge against, the ask is all we have."""
-    assert choose_base_price(ask=139.40, anchor=None, ticker="CRUS") == 139.40
+def test_enter_positions_skips_invalid_sizing_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing broker price cannot produce a meaningful whole-share target."""
+    strategy = FakeStrategy(last_price=None)
+    monkeypatch.setattr(
+        entries,
+        "record_order",
+        lambda order: pytest.fail("invalid entry must not reach the ledger"),
+    )
 
+    entries.enter_positions(strategy, portfolio())
 
-def test_limit_crosses_the_base_price() -> None:
-    """The limit sits above the base price so the order fills on submission.
-
-    ARLP and DAC on 2026-07-22 both failed to fill because a stale analyst cap
-    held their limits below the market. Nothing caps the limit now, so each
-    prices off what the stock is actually trading at.
-    """
-    assert entry_limit_price(24.82) == 24.94
-    assert entry_limit_price(132.95) == 133.61
+    assert strategy.created == []
+    assert strategy.submitted == []
