@@ -31,6 +31,10 @@ TOP_N = 200
 TARGET_IDEAS = 85
 MAX_WORKERS = 7
 
+# Summary line every N completed tickers. The per-ticker lines below are easily
+# lost in a log dominated by per-agent chatter; this stays scannable.
+PROGRESS_EVERY = 10
+
 # Universe listings for the symbol -> company-name map. The floor sits below the
 # universe's $2bn cutoff so names survive market-cap drift between panel builds.
 EXCHANGES = "NASDAQ,NYSE,AMEX"
@@ -106,6 +110,17 @@ def generate_trade_ideas() -> None:
             except Exception as exc:
                 failed += 1
                 log.error("[%d/%d] %s failed: %s", done + failed, len(symbols), symbol, exc)
+
+            completed = done + failed
+
+            if completed % PROGRESS_EVERY == 0:
+                log.info(
+                    "progress: %d/%d tickers analyzed (%d ok, %d failed)",
+                    completed,
+                    len(symbols),
+                    done,
+                    failed,
+                )
 
             if target_hit:
                 continue
