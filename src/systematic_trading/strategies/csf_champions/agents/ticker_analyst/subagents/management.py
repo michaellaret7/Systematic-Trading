@@ -106,5 +106,6 @@ MANAGEMENT_SUBAGENT_CONFIG = SubAgentConfig(
     system=SYSTEM,
     tools=(),
     provider="openrouter",
-    model="deepseek/deepseek-v4-pro",
+   #  model="deepseek/deepseek-v4-pro",
+   model="poolside/laguna-s-2.1:free",
 )
