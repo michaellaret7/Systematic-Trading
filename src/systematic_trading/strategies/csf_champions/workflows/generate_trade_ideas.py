@@ -135,7 +135,22 @@ def generate_trade_ideas() -> None:
                     TARGET_IDEAS,
                 )
                 # In-flight agents finish and are logged; unstarted tickers are dropped.
-                pool.shutdown(wait=False, cancel_futures=True)
+                #
+                # Cancel each future directly rather than via
+                # ``shutdown(cancel_futures=True)``: that drains the work queue and
+                # exits every worker, so nothing is left to call
+                # ``set_running_or_notify_cancel`` on the cancelled futures — the only
+                # thing that wakes ``as_completed``, which then blocks forever
+                # (CPython bpo-43727). A hang here never returns from this function, so
+                # the job never exits and its cloud machine never self-deletes.
+                #
+                # Cancelling first and sealing after is load-bearing: the queue is FIFO,
+                # so ``shutdown``'s sentinel lands behind the cancelled items and every
+                # one is notified before the workers stop.
+                for candidate in futures:
+                    candidate.cancel()
+
+                pool.shutdown(wait=False)
 
     log.info("Batch complete: %d succeeded, %d failed", done, failed)
 

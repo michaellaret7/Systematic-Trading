@@ -45,6 +45,8 @@ class CsfChampions(Strategy):
 
     # This is the first function that runs, it runs once at the beginning of the entire strategy run
     def initialize(self) -> None:
+        # This is how often the on trading iteration function runs
+        # This starts in the morning
         self.sleeptime = "1D"
 
         # The draft book is stateful across the whole strategy run: created

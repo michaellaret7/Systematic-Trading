@@ -29,6 +29,15 @@ REPO_URL_TEMPLATE = "https://{auth}github.com/michaellaret7/Systematic-Trading.g
 
 ENV_FILE = Path(__file__).parents[3] / ".env"
 
+# Hard ceiling on a finite job's runtime. ``self_delete`` runs only after the job
+# process exits, so any hang — a deadlocked future, a stalled socket, an agent
+# that never returns — bills the machine indefinitely. This guarantees the
+# process ends: TERM first so Python can flush its logs, SIGKILL if it ignores
+# that. An exit code of 124 marks a timeout kill rather than a clean finish.
+# A full generate_trade_ideas run takes ~2.5h, so this is slack, not a budget.
+JOB_TIMEOUT = "4h"
+JOB_KILL_AFTER = "5m"
+
 # Sampled into the run log every 30s so an OOM leaves evidence. Kept out of the
 # f-strings below because its awk programs are brace-heavy.
 MONITOR_SNIPPET = """
@@ -292,7 +301,8 @@ def job_script(
     """Render the finite-job lifecycle: bootstrap, run, upload, self-delete.
 
     Plain sequencing (no ``set -e``): the log upload and self-delete must run
-    even when an earlier step fails.
+    even when an earlier step fails. The job itself runs under ``timeout``
+    (``JOB_TIMEOUT``) so a hang cannot keep the machine billing forever.
 
     ``self_delete`` is the function definition from ``self_delete_snippet``.
     ``preamble`` is provider setup that runs after that definition and before
@@ -315,7 +325,8 @@ upload_log
 
 {periodic_upload_snippet()}
 # No pipe needed: CAPTURE_SNIPPET already tees this script's whole output.
-uv run python -m {job_module}
+# `timeout` is the backstop that makes self-delete unconditional — see JOB_TIMEOUT.
+timeout --signal=TERM --kill-after={JOB_KILL_AFTER} {JOB_TIMEOUT} uv run python -m {job_module}
 echo "=== job exited rc=$? ==="
 
 upload_log
