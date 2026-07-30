@@ -41,7 +41,7 @@ class CsfChampions(Strategy):
 
     parameters = {
         "generate_ideas": False,
-        "build_portfolio": True,
+        "build_portfolio": False,
     }
 
     # This is the first function that runs, it runs once at the beginning of the entire strategy run

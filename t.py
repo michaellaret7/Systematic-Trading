@@ -3,7 +3,7 @@ from systematic_trading.config import CLOUDWATCH_LOG_GROUP
 
 for record in tail_cloudwatch_log(
     CLOUDWATCH_LOG_GROUP,
-    stream_prefix="live_btc_ticker",
+    stream_prefix="live_csf_champions",
     history=50,
 ):
     print(record)
