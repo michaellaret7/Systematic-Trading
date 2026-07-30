@@ -103,9 +103,9 @@ accounts cover the proving phase).
   sizes against its sleeve's allocation percentage of the account — neither
   ever reads `self.cash` as "mine." Champions needs this convention too; build
   it before the second strategy exists.
-- **Attribution:** ownership per name is unambiguous, so per-sleeve P&L is
-  computed from our own trade ledger even though the broker sees one blended
-  account.
+- **Attribution:** ownership per name is unambiguous under universe exclusion.
+  Sleeve P&L can be derived later from Alpaca fills tagged by strategy policy;
+  the broker still sees one blended account.
 
 ## Bottom line
 

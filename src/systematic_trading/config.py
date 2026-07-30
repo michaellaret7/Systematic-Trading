@@ -58,7 +58,7 @@ def fmp_api_key() -> str:
 
 
 def aws_region() -> str:
-    """AWS region hosting the DynamoDB trade ledger (defaults to us-east-1).
+    """AWS region hosting DynamoDB (defaults to us-east-1).
 
     Uses botocore's standard variable name so the same setting steers every
     AWS SDK client; only DynamoDB needs it passed explicitly.

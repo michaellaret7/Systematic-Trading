@@ -1,8 +1,7 @@
-"""Shared DynamoDB plumbing for the repository's tables (trade ledger, trade ideas).
+"""Shared DynamoDB plumbing for the repository's tables (trade ideas).
 
-Both tables use the same shape — a string partition key plus a
-timestamp-prefixed sort key — so the table handle, pagination loop, and
-Decimal-to-float conversion live here once.
+Tables use a string partition key plus a timestamp-prefixed sort key, so the
+table handle, pagination loop, and Decimal-to-float conversion live here once.
 """
 
 from decimal import Decimal

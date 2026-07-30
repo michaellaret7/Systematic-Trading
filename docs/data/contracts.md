@@ -20,14 +20,13 @@ policy.
 
 ## DynamoDB records
 
-`systematic_trading.domain.ideas.TradeIdea` and
-`systematic_trading.domain.trades.TradeOrder` are the typed application records.
-Repositories accept these records and exclusively own:
+`systematic_trading.domain.ideas.TradeIdea` is the typed application record for
+the trade-ideas queue. The ideas repository accepts these records and exclusively
+owns:
 
 - UUID and sort-key generation.
 - Datetime serialization.
 - DynamoDB `Decimal` conversion.
 - Table names and expressions.
-- Paper/live stamping for fills.
 
 Strategies and agents never construct DynamoDB items directly.

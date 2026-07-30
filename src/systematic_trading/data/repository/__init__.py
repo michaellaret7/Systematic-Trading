@@ -12,12 +12,8 @@ Datasets:
   fundamental screener reads from.
 - **Prices** (``prices``) — the daily split-adjusted OHLCV parquet covering
   the trailing 4 years for every panel symbol.
-- **Trade ledger** (``ledger``) — DynamoDB record of live/paper entry orders,
-  one item per market order completed by the broker's final-fill event.
 - **Trade ideas** (``ideas``) — DynamoDB queue of the fundamental agent's
   trade proposals: pending until the executor marks them executed/rejected.
-- **Portfolio** (``portfolio``) — DynamoDB open positions per strategy for
-  multi-strategy ownership inside one Alpaca account.
 """
 
 from systematic_trading.data.repository.fundamentals import (
@@ -42,21 +38,6 @@ from systematic_trading.data.repository.ideas import (
     submit_idea,
     update_idea_status,
 )
-from systematic_trading.data.repository.ledger import (
-    attach_broker_order_id,
-    complete_order,
-    load_open_orders,
-    load_trades,
-    record_order,
-)
-from systematic_trading.data.repository.portfolio import (
-    apply_broker_position,
-    delete_position,
-    load_positions,
-    seed_position,
-    update_marks,
-    upsert_position,
-)
 from systematic_trading.data.repository.prices import (
     daily_prices_uri,
     load_daily_prices,
@@ -66,32 +47,21 @@ from systematic_trading.data.repository.prices import (
 __all__ = [
     "PERIODS",
     "STATEMENTS",
-    "apply_broker_position",
-    "attach_broker_order_id",
-    "complete_order",
     "count_ideas_since",
     "daily_prices_uri",
-    "delete_position",
     "load_daily_prices",
     "load_ideas",
-    "load_open_orders",
     "load_panel",
-    "load_positions",
     "load_sector_tags",
     "load_statement",
-    "load_trades",
     "load_universe",
     "panel_symbols",
     "panel_uri",
-    "record_order",
-    "seed_position",
     "statement_columns",
     "statement_uri",
     "submit_idea",
     "universe_uri",
     "update_idea_status",
-    "update_marks",
-    "upsert_position",
     "write_daily_prices",
     "write_panel",
     "write_statement",

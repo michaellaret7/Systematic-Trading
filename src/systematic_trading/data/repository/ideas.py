@@ -1,14 +1,12 @@
 """DynamoDB trade-ideas table: trade proposals from the fundamental agent.
 
 An idea is a proposal, not a trade. The agent submits it as ``pending``; the
-executor later marks it ``executed`` (order submitted), ``filled`` (target
-quantity reached), or ``rejected``. The idea-to-order link lives on the
-trade-ledger row (``idea_id``), not here. Each item carries the reference
-price at submission time so idea quality can be measured independently of
-execution.
+executor later marks it ``executed`` (order submitted), ``filled``, or
+``rejected``. Each item carries the reference price at submission time so idea
+quality can be measured independently of execution.
 
-Keyed like the ledger: ``strategy`` partition + timestamp-prefixed ``idea_id``
-sort key, so a query returns ideas in chronological order.
+Keyed by ``strategy`` partition + timestamp-prefixed ``idea_id`` sort key, so a
+query returns ideas in chronological order.
 """
 
 from datetime import datetime

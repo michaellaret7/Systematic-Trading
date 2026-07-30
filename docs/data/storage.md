@@ -15,7 +15,6 @@ I/O against raw paths.
 ## DynamoDB
 
 - `trade-ideas`: pending, executed, and rejected strategy proposals.
-- `trade-ledger`: append-only paper/live fills.
 
 The shared DynamoDB helper owns table construction, pagination, and numeric
 deserialization. Domain records remain independent from boto3.
