@@ -8,6 +8,7 @@ they can be marked rejected downstream.
 """
 
 from dataclasses import dataclass, field
+from datetime import date
 
 from systematic_trading.domain.ideas import IdeaSide
 
@@ -44,6 +45,9 @@ class Portfolio:
     def __init__(self) -> None:
         self.holdings: dict[str, Holding] = {}
         self.rejected: dict[str, tuple[Holding, str]] = {}
+        # ticker → (ticker, drawdown_pct, review_date); date is calendar day only
+        self.drawdown_revisions: dict[str, tuple[str, float, date]] = {}
+
 
     @property
     def total_weight(self) -> float:

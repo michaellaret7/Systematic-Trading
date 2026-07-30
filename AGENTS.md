@@ -238,7 +238,7 @@ def process_items(items: list[str], lookup: dict):
 
 - Module docstring explaining purpose.
 - Complete docstrings on public functions.
-- **Preserve existing comments.** Do NOT delete or "clean up" inline comments that are already in the code — including short step-marker comments. Treat them as intentional. Only remove a comment if it is factually wrong after your change, and then replace it with a correct one rather than deleting it outright. This overrides any default tendency to strip "narration" comments.
+- **Never delete user-authored comments.** Do not remove, rewrite, relocate, or "clean up" comments the user wrote — including inline notes, step markers, trailing flow/design blocks (e.g. module-level `"""..."""` plans), and TODO annotations. If a comment is factually wrong after a code change, fix the factual part in place; do not delete the comment. When rewriting a file, restore every pre-existing user comment. This overrides any default tendency to strip "narration" comments.
 - When editing a function, leave untouched comments exactly as they are unless the line they describe is itself being changed.
 - Helper functions live at the **top** of the file under a banner block:
 

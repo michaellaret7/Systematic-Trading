@@ -22,6 +22,9 @@ from systematic_trading.strategies.csf_champions.workflows.enter_positions impor
 from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas import (
     generate_trade_ideas,
 )
+from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import (
+    prune_drawdown_revisions,
+)
 
 log = get_logger(__name__)
 
@@ -60,6 +63,12 @@ class CsfChampions(Strategy):
 
         # Push the finalized draft book to the broker as whole-share market buys.
         enter_positions(self, self.portfolio)
+
+    def before_market_opens(self) -> None:
+        """Drop drawdown revisions that have aged out of the two-week window."""
+        # Drop all tickers that are expired out of the 2 week review window
+        # if they are still in a drawdown, they will be reviewed again
+        prune_drawdown_revisions(self, self.portfolio)
 
     def on_trading_iteration(self) -> None:
         """Daily strategy heartbeat."""
