@@ -204,7 +204,7 @@ EnvironmentFile={ENV_PATH}
 EnvironmentFile=/root/cloudwatch.env
 # `tee -a`, not `tee`: the memory monitor is appending to this same file, and a
 # truncating tee would overwrite its samples from offset 0.
-ExecStart=/bin/bash -lc 'uv run live {strategy_name} 2>&1 | tee -a /root/job.log'
+ExecStart=/bin/bash -lc '/root/.local/bin/uv run live {strategy_name} 2>&1 | tee -a /root/job.log'
 Restart=always
 # Damp a crash loop: an instantly-crashing strategy would otherwise cycle as
 # fast as systemd can restart it, flooding S3 with log files.

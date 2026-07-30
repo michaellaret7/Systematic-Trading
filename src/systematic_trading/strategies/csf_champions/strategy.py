@@ -29,6 +29,11 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
 log = get_logger(__name__)
 
 
+"""
+Threading queues (queue.Queue) are for passing tasks between threads in one process; if you want true parallelism across cores (relevant for CPU-bound strategy backtests),
+the same put/get pattern exists via multiprocessing.Queue for inter-process producer-consumer setups.
+"""
+
 class CsfChampions(Strategy):
     """CSF Champions: agent-scored fundamentals book, long-only sleeve."""
 
