@@ -30,7 +30,7 @@ def upsert_position(position: Position) -> None:
     )
     values: dict = {
         ":side": position.side,
-        ":q": position.quantity,
+        ":q": Decimal(str(position.quantity)),
         ":c": Decimal(str(position.avg_cost)),
         ":u": position.updated_at.isoformat(),
         ":p": is_paper(),
@@ -58,7 +58,7 @@ def apply_broker_position(
     strategy: str,
     symbol: str,
     *,
-    quantity: int,
+    quantity: float,
     side: PositionSide,
     avg_cost: float,
     now: datetime,
@@ -67,7 +67,7 @@ def apply_broker_position(
     """Sync one strategy-owned symbol to the post-fill broker size.
 
     ``quantity <= 0`` deletes the row (flat). Otherwise validates through
-    ``Position`` and upserts book fields.
+    ``Position`` and upserts book fields. Quantity may be fractional (crypto).
     """
     symbol = symbol.strip().upper()
 
@@ -135,7 +135,7 @@ def seed_position(position: Position, marks: PositionMarks) -> None:
         "strategy": position.strategy,
         "symbol": position.symbol,
         "side": position.side,
-        "quantity": position.quantity,
+        "quantity": Decimal(str(position.quantity)),
         "avg_cost": Decimal(str(position.avg_cost)),
         "opened_at": position.opened_at.isoformat(),
         "updated_at": position.updated_at.isoformat(),
@@ -155,4 +155,5 @@ def seed_position(position: Position, marks: PositionMarks) -> None:
 
 if __name__ == "__main__":
     x = load_positions()
-    print(x.loc[(x["strategy"] == "csf_champions") & (x["unrealized_pl"] > 0)])
+    # print(x.loc[(x["strategy"] == "btc_ticker") & (x["unrealized_pl"] > 0)])
+    print(x)

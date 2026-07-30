@@ -53,25 +53,28 @@ def record_order(order: TradeOrder) -> str:
     (``self.get_datetime()``). The row is created before broker submission so
     a fast market fill can always find it. The paper/live flag is stamped
     automatically so paper orders can never be mistaken for real-money ones.
+    ``idea_id`` is stored only when the order is linked to a trade-ideas row.
     """
     trade_id = f"{order.submitted_at.isoformat()}#{order.symbol}#{uuid4().hex[:8]}"
 
-    get_table(TABLE_NAME).put_item(
-        Item={
-            "strategy": order.strategy,
-            "trade_id": trade_id,
-            "idea_id": order.idea_id,
-            "symbol": order.symbol,
-            "side": order.side,
-            "target_quantity": order.target_quantity,
-            "filled_quantity": 0,
-            "filled_cost": Decimal("0"),
-            "filled_price": None,
-            "filled_at": None,
-            "submitted_at": order.submitted_at.isoformat(),
-            "paper": is_paper(),
-        }
-    )
+    item: dict = {
+        "strategy": order.strategy,
+        "trade_id": trade_id,
+        "symbol": order.symbol,
+        "side": order.side,
+        "target_quantity": Decimal(str(order.target_quantity)),
+        "filled_quantity": Decimal("0"),
+        "filled_cost": Decimal("0"),
+        "filled_price": None,
+        "filled_at": None,
+        "submitted_at": order.submitted_at.isoformat(),
+        "paper": is_paper(),
+    }
+
+    if order.idea_id is not None:
+        item["idea_id"] = order.idea_id
+
+    get_table(TABLE_NAME).put_item(Item=item)
 
     return trade_id
 
@@ -81,14 +84,17 @@ def complete_order(
     trade_id: str,
     average_fill_price: float,
     filled_at: datetime,
-) -> str:
-    """Close one ledger row from the broker's fully-filled order event."""
+) -> str | None:
+    """Close one ledger row from the broker's fully-filled order event.
+
+    Returns the linked ``idea_id`` when present, otherwise ``None``.
+    """
     if not isfinite(average_fill_price) or average_fill_price <= 0:
         raise ValueError("average_fill_price must be positive")
 
     table = get_table(TABLE_NAME)
     item = _load_order(table, strategy, trade_id)
-    filled_quantity = int(item["target_quantity"])
+    filled_quantity = Decimal(str(item["target_quantity"]))
     filled_price = Decimal(str(average_fill_price))
 
     table.update_item(
@@ -105,7 +111,9 @@ def complete_order(
         },
     )
 
-    return str(item["idea_id"])
+    idea_id = item.get("idea_id")
+
+    return str(idea_id) if idea_id is not None else None
 
 
 def load_trades(strategy: str | None = None) -> pd.DataFrame:

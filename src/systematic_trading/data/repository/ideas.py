@@ -115,4 +115,4 @@ def update_idea_status(strategy: str, idea_id: str, status: IdeaStatus) -> None:
 
 if __name__ == "__main__":
     ideas = load_ideas()
-    print(ideas.head(20))
+    print(ideas)
