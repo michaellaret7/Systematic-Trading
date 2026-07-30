@@ -16,6 +16,8 @@ Datasets:
   one item per market order completed by the broker's final-fill event.
 - **Trade ideas** (``ideas``) — DynamoDB queue of the fundamental agent's
   trade proposals: pending until the executor marks them executed/rejected.
+- **Portfolio** (``portfolio``) — DynamoDB open positions per strategy for
+  multi-strategy ownership inside one Alpaca account.
 """
 
 from systematic_trading.data.repository.fundamentals import (
@@ -45,6 +47,13 @@ from systematic_trading.data.repository.ledger import (
     load_trades,
     record_order,
 )
+from systematic_trading.data.repository.portfolio import (
+    delete_position,
+    load_positions,
+    seed_position,
+    update_marks,
+    upsert_position,
+)
 from systematic_trading.data.repository.prices import (
     daily_prices_uri,
     load_daily_prices,
@@ -57,9 +66,11 @@ __all__ = [
     "complete_order",
     "count_ideas_since",
     "daily_prices_uri",
+    "delete_position",
     "load_daily_prices",
     "load_ideas",
     "load_panel",
+    "load_positions",
     "load_sector_tags",
     "load_statement",
     "load_trades",
@@ -67,11 +78,14 @@ __all__ = [
     "panel_symbols",
     "panel_uri",
     "record_order",
+    "seed_position",
     "statement_columns",
     "statement_uri",
     "submit_idea",
     "universe_uri",
     "update_idea_status",
+    "update_marks",
+    "upsert_position",
     "write_daily_prices",
     "write_panel",
     "write_statement",

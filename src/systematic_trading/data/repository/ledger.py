@@ -22,7 +22,7 @@ import pandas as pd
 from boto3.dynamodb.conditions import Key
 
 from systematic_trading.config import is_paper
-from systematic_trading.data.repository.dynamo import get_table, query_all
+from systematic_trading.data.repository.dynamo import get_table, query_all, scan_all
 from systematic_trading.domain.trades import TradeOrder
 
 TABLE_NAME = "trade-ledger"
@@ -108,17 +108,22 @@ def complete_order(
     return str(item["idea_id"])
 
 
-def load_trades(strategy: str) -> pd.DataFrame:
-    """All recorded orders for one strategy, oldest first.
+def load_trades(strategy: str | None = None) -> pd.DataFrame:
+    """Recorded orders for one strategy, or the whole table when omitted.
 
     Follows DynamoDB pagination so the full history comes back regardless of
-    size. Returns an empty frame if the strategy has no orders yet.
+    size. Returns an empty frame if nothing matches.
     """
-    items = query_all(get_table(TABLE_NAME), Key("strategy").eq(strategy))
+    table = get_table(TABLE_NAME)
+    items = (
+        scan_all(table)
+        if strategy is None
+        else query_all(table, Key("strategy").eq(strategy))
+    )
 
     return pd.DataFrame(items)
 
 
 if __name__ == "__main__":
-    trades = load_trades("csf_champions")
+    trades = load_trades()
     print(trades)

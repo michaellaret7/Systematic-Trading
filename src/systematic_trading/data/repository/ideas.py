@@ -18,7 +18,7 @@ from uuid import uuid4
 import pandas as pd
 from boto3.dynamodb.conditions import Attr, Key
 
-from systematic_trading.data.repository.dynamo import get_table, query_all
+from systematic_trading.data.repository.dynamo import get_table, query_all, scan_all
 from systematic_trading.domain.ideas import IDEA_STATUSES, IdeaStatus, TradeIdea
 
 TABLE_NAME = "trade-ideas"
@@ -79,14 +79,21 @@ def count_ideas_since(strategy: str, since: datetime) -> int:
     return total
 
 
-def load_ideas(strategy: str, status: IdeaStatus | None = None) -> pd.DataFrame:
-    """Trade ideas for one strategy, oldest first; optionally one status only.
+def load_ideas(
+    strategy: str | None = None,
+    status: IdeaStatus | None = None,
+) -> pd.DataFrame:
+    """Trade ideas for one strategy, or the whole table when omitted.
 
-    Returns an empty frame if nothing matches.
+    ``status`` optionally limits either scope to one lifecycle state.
     """
     filter_expression = Attr("status").eq(status) if status else None
-
-    items = query_all(get_table(TABLE_NAME), Key("strategy").eq(strategy), filter_expression)
+    table = get_table(TABLE_NAME)
+    items = (
+        scan_all(table, filter_expression)
+        if strategy is None
+        else query_all(table, Key("strategy").eq(strategy), filter_expression)
+    )
 
     return pd.DataFrame(items)
 
@@ -107,5 +114,5 @@ def update_idea_status(strategy: str, idea_id: str, status: IdeaStatus) -> None:
 
 
 if __name__ == "__main__":
-    ideas = load_ideas("csf_champions")
+    ideas = load_ideas()
     print(ideas.head(20))

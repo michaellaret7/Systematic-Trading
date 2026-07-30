@@ -52,3 +52,28 @@ def query_all(
         kwargs["ExclusiveStartKey"] = last_key
 
     return [from_dynamo(item) for item in items]
+
+
+def scan_all(
+    table: Any,
+    filter_expression: ConditionBase | None = None,
+) -> list[dict]:
+    """Every item matching an optional filter, following DynamoDB pagination."""
+    items: list[dict] = []
+    kwargs: dict = {}
+
+    if filter_expression is not None:
+        kwargs["FilterExpression"] = filter_expression
+
+    while True:
+        response = table.scan(**kwargs)
+        items.extend(response["Items"])
+
+        last_key = response.get("LastEvaluatedKey")
+
+        if last_key is None:
+            break
+
+        kwargs["ExclusiveStartKey"] = last_key
+
+    return [from_dynamo(item) for item in items]
