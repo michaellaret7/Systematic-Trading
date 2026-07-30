@@ -20,15 +20,16 @@ class Position:
     """One open position owned by a single strategy.
 
     Keys in storage are ``(strategy, symbol)``. ``quantity`` is always the
-    open size after the latest fill; flat positions are deleted from the
-    table rather than stored at zero. ``avg_cost`` comes from our fills, not
-    the broker. ``idea_id`` links to the opening trade idea when one exists.
+    open size after the latest fill (whole shares or fractional crypto);
+    flat positions are deleted from the table rather than stored at zero.
+    ``avg_cost`` comes from our fills, not the broker. ``idea_id`` links to
+    the opening trade idea when one exists.
     """
 
     strategy: str
     symbol: str
     side: PositionSide
-    quantity: int
+    quantity: float
     avg_cost: float
     opened_at: datetime
     updated_at: datetime
@@ -45,7 +46,7 @@ class Position:
         if self.side not in POSITION_SIDES:
             raise ValueError(f"unknown side {self.side!r}; expected one of {POSITION_SIDES}")
 
-        if self.quantity <= 0:
+        if not isfinite(self.quantity) or self.quantity <= 0:
             raise ValueError("quantity must be positive")
 
         if not isfinite(self.avg_cost) or self.avg_cost <= 0:

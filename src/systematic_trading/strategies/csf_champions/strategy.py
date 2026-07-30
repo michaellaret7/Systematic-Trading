@@ -6,17 +6,20 @@ portfolio via the portfolio-constructor agent, then submit the book as
 whole-share market buys.
 
 Each fully-filled broker order closes its trade-ledger row, marks its source
-idea filled, and syncs the strategy-owned portfolio row to the post-fill
-broker size. Each live trading iteration refreshes unrealized marks from
-Alpaca onto existing portfolio rows.
+idea filled, and syncs the strategy-owned portfolio row. Because Lumibot drops
+fill events on the first iteration, every live iteration also reconciles open
+ledger rows against the broker. Marks refresh on the same cadence.
 """
 
 from lumibot.entities import Order, Position
 from lumibot.strategies import Strategy
 
-from systematic_trading.data.repository import complete_order, update_idea_status
 from systematic_trading.logging_setup import get_logger
-from systematic_trading.portfolio import sync_portfolio_from_fill, sync_position_marks
+from systematic_trading.portfolio import (
+    finalize_filled_trade,
+    reconcile_open_orders,
+    sync_position_pnl,
+)
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 from systematic_trading.strategies.csf_champions.workflows.build_portfolio import (
     construct_portfolio,
@@ -51,9 +54,10 @@ class CsfChampions(Strategy):
         # empty here, seeded and shaped by build_portfolio, read by submission.
         self.portfolio = Portfolio()
 
-        # Each finalized portfolio has one entry order per symbol. Registering
-        # this map before submission lets an immediate market fill find its row.
+        # In-session maps so fill hooks resolve ledger rows quickly. Durable
+        # recovery uses ledger.broker_order_id + reconcile_open_orders.
         self.trade_ids_by_symbol: dict[str, str] = {}
+        self.trade_ids_by_order_id: dict[str, str] = {}
 
         # The flag is the single switch: only run the startup pipeline
         # (idea generation, construction, submission) when explicitly asked.
@@ -73,11 +77,15 @@ class CsfChampions(Strategy):
         enter_positions(self, self.portfolio)
 
     def on_trading_iteration(self) -> None:
-        """Daily heartbeat: refresh unrealized marks from Alpaca."""
+        """Daily heartbeat: reconcile missed fills, then refresh marks."""
         log.info("CSF Champions daily trading iteration")
 
-        if not self.is_backtesting:
-            sync_position_marks(self, STRATEGY)
+        if self.is_backtesting:
+            return
+
+        # Close ledger rows whose broker fills were dropped at startup / restart.
+        reconcile_open_orders(self, STRATEGY)
+        sync_position_pnl(self, STRATEGY)
 
     def on_filled_order(
         self,
@@ -92,29 +100,30 @@ class CsfChampions(Strategy):
             return
 
         symbol = order.asset.symbol
-        trade_id = self.trade_ids_by_symbol.get(symbol)
+        order_id = str(order.identifier) if order.identifier is not None else ""
+        trade_id = self.trade_ids_by_order_id.get(order_id) or self.trade_ids_by_symbol.get(
+            symbol
+        )
 
         if trade_id is None:
             log.warning(
-                "%s: filled order %s has no trade-ledger row",
+                "%s: filled order %s has no trade-ledger row (will rely on reconcile)",
                 symbol,
                 order.identifier,
             )
             return
 
         filled_at = self.get_datetime()
-        idea_id = complete_order(
+        finalize_filled_trade(
             STRATEGY,
             trade_id,
+            symbol=symbol,
             average_fill_price=float(order.avg_fill_price or price),
             filled_at=filled_at,
+            broker_position=position,
         )
-        update_idea_status(STRATEGY, idea_id, "filled")
-        sync_portfolio_from_fill(
-            STRATEGY,
-            position,
-            symbol=symbol,
-            idea_id=idea_id,
-            filled_at=filled_at,
-        )
-        log.info("%s: market order filled - idea marked filled", symbol)
+
+        if order_id:
+            self.trade_ids_by_order_id.pop(order_id, None)
+
+        log.info("%s: market order filled - ledger and portfolio updated", symbol)

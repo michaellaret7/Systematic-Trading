@@ -57,11 +57,11 @@ def trade_order() -> TradeOrder:
     """One valid market entry order for repository tests."""
     return TradeOrder(
         strategy="csf_champions",
-        idea_id="2026-07-15T00:00:00+00:00#AAPL#61e26b27",
         symbol="AAPL",
         side="buy",
         target_quantity=40,
         submitted_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        idea_id="2026-07-15T00:00:00+00:00#AAPL#61e26b27",
     )
 
 
@@ -89,13 +89,33 @@ def test_record_order_serializes_market_order(monkeypatch: pytest.MonkeyPatch) -
     assert trade_id.startswith("2026-07-15T00:00:00+00:00#AAPL#")
     assert table.item is not None
     assert table.item["idea_id"] == "2026-07-15T00:00:00+00:00#AAPL#61e26b27"
-    assert table.item["target_quantity"] == 40
-    assert table.item["filled_quantity"] == 0
+    assert table.item["target_quantity"] == Decimal("40")
+    assert table.item["filled_quantity"] == Decimal("0")
     assert table.item["filled_cost"] == Decimal("0")
     assert table.item["filled_price"] is None
     assert table.item["filled_at"] is None
     assert "limit_price" not in table.item
     assert table.item["paper"] is True
+
+
+def test_record_order_omits_idea_id_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Orders without a trade-ideas link do not write idea_id."""
+    table = FakeTable()
+    monkeypatch.setattr(ledger, "get_table", lambda name: table)
+    monkeypatch.setattr(ledger, "is_paper", lambda: True)
+
+    ledger.record_order(
+        TradeOrder(
+            strategy="btc_ticker",
+            symbol="BTC",
+            side="buy",
+            target_quantity=0.0002,
+            submitted_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        )
+    )
+
+    assert table.item is not None
+    assert "idea_id" not in table.item
 
 
 def test_complete_order_closes_row_at_broker_average(
@@ -124,7 +144,7 @@ def test_complete_order_closes_row_at_broker_average(
     assert completed_idea == "2026-07-15T00:00:00+00:00#AAPL#61e26b27"
     assert table.update_kwargs is not None
     values = table.update_kwargs["ExpressionAttributeValues"]
-    assert values[":q"] == 40
+    assert values[":q"] == Decimal("40")
     assert values[":c"] == Decimal("405.000")
     assert values[":p"] == Decimal("10.125")
     assert values[":t"] == "2026-07-16T00:00:00+00:00"
@@ -143,6 +163,62 @@ def test_complete_order_rejects_unknown_order(monkeypatch: pytest.MonkeyPatch) -
         )
 
 
+def test_complete_order_is_idempotent_when_already_filled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second complete for the same row does not rewrite fill fields."""
+    table = FakeTable(
+        item={
+            "strategy": "csf_champions",
+            "trade_id": "trade-1",
+            "idea_id": "idea-1",
+            "target_quantity": Decimal("10"),
+            "filled_at": "2026-07-16T00:00:00+00:00",
+        }
+    )
+    monkeypatch.setattr(ledger, "get_table", lambda name: table)
+
+    idea_id = ledger.complete_order(
+        "csf_champions",
+        "trade-1",
+        average_fill_price=12.0,
+        filled_at=datetime(2026, 7, 17, tzinfo=timezone.utc),
+    )
+
+    assert idea_id == "idea-1"
+    assert table.update_kwargs is None
+
+
+def test_attach_broker_order_id_persists_broker_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Broker order ids are stored for durable reconcile after restart."""
+    table = FakeTable()
+    monkeypatch.setattr(ledger, "get_table", lambda name: table)
+
+    ledger.attach_broker_order_id("csf_champions", "trade-1", "alpaca-oid")
+
+    assert table.update_kwargs is not None
+    assert table.update_kwargs["Key"] == {"strategy": "csf_champions", "trade_id": "trade-1"}
+    assert table.update_kwargs["ExpressionAttributeValues"][":b"] == "alpaca-oid"
+
+
+def test_load_open_orders_filters_completed_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only rows without filled_at are open."""
+    monkeypatch.setattr(
+        ledger,
+        "query_all",
+        lambda table, key: [
+            {"trade_id": "open", "filled_at": None},
+            {"trade_id": "done", "filled_at": "2026-07-16T00:00:00+00:00"},
+            {"trade_id": "also-open"},
+        ],
+    )
+    monkeypatch.setattr(ledger, "get_table", lambda name: FakeTable())
+
+    open_rows = ledger.load_open_orders("csf_champions")
+
+    assert [row["trade_id"] for row in open_rows] == ["open", "also-open"]
+
+
 def test_invalid_domain_records_fail_before_persistence() -> None:
     """Malformed ideas and orders are rejected before repository I/O."""
     with pytest.raises(ValueError, match="score"):
@@ -153,6 +229,15 @@ def test_invalid_domain_records_fail_before_persistence() -> None:
 
     with pytest.raises(ValueError, match="idea_id"):
         replace(trade_order(), idea_id="  ")
+
+    # No idea is valid for sleeves that do not use the trade-ideas table.
+    TradeOrder(
+        strategy="btc_ticker",
+        symbol="BTC",
+        side="buy",
+        target_quantity=0.0002,
+        submitted_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+    )
 
     with pytest.raises(ValueError, match="quantity"):
         replace(open_position(), quantity=0)
@@ -204,7 +289,7 @@ def test_apply_broker_position_upserts_book_fields(monkeypatch: pytest.MonkeyPat
     assert table.update_kwargs is not None
     assert table.update_kwargs["Key"] == {"strategy": "csf_champions", "symbol": "AAPL"}
     values = table.update_kwargs["ExpressionAttributeValues"]
-    assert values[":q"] == 40
+    assert values[":q"] == Decimal("40")
     assert values[":c"] == Decimal("101.25")
     assert values[":p"] is True
     assert values[":idea"] == "idea-aapl"
@@ -258,7 +343,7 @@ def test_seed_position_writes_book_and_marks(monkeypatch: pytest.MonkeyPatch) ->
     portfolio.seed_position(open_position(), position_marks())
 
     assert table.item is not None
-    assert table.item["quantity"] == 40
+    assert table.item["quantity"] == Decimal("40")
     assert table.item["avg_cost"] == Decimal("101.25")
     assert table.item["unrealized_plpc"] == Decimal("0.025")
     assert table.item["paper"] is True

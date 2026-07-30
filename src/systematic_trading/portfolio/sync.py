@@ -12,8 +12,10 @@ from typing import Any
 
 from systematic_trading.data.repository import (
     apply_broker_position,
+    complete_order,
     delete_position,
     load_positions,
+    update_idea_status,
     update_marks,
 )
 from systematic_trading.domain.portfolio import PositionMarks, PositionSide
@@ -21,10 +23,33 @@ from systematic_trading.logging_setup import get_logger
 
 log = get_logger(__name__)
 
+# Alpaca crypto pairs are BASE+QUOTE with no separator (e.g. BTCUSD). Our book
+# stores the base (BTC). Strip these quotes when indexing broker positions.
+_CRYPTO_QUOTE_SUFFIXES = ("USDT", "USDC", "USD")
+
 
 #     ================================
 # --> Helper funcs
 #     ================================
+
+
+def normalize_symbol(symbol: str) -> str:
+    """Normalize a broker or book symbol for portfolio keys.
+
+    Equities stay as-is (uppercased). Crypto pairs like ``BTCUSD`` collapse to
+    the base asset ``BTC`` so fill rows and Alpaca marks join.
+    """
+    raw = symbol.strip().upper()
+
+    for quote in _CRYPTO_QUOTE_SUFFIXES:
+        if raw.endswith(quote) and len(raw) > len(quote):
+            base = raw[: -len(quote)]
+
+            # Crypto bases are short tickers (BTC, ETH, SOL, …), not equity roots.
+            if 2 <= len(base) <= 5 and base.isalpha():
+                return base
+
+    return raw
 
 
 def position_side(broker_position: Any, signed_qty: float) -> PositionSide:
@@ -39,10 +64,11 @@ def position_side(broker_position: Any, signed_qty: float) -> PositionSide:
 
 
 def alpaca_positions_by_symbol(strategy: Any) -> dict[str, Any]:
-    """Open Alpaca positions keyed by uppercase symbol.
+    """Open Alpaca positions keyed by normalized uppercase symbol.
 
     Uses the raw TradingClient so mark fields Lumibot drops (e.g.
-    ``unrealized_plpc``) are available.
+    ``unrealized_plpc``) are available. Crypto pairs are indexed under both the
+    raw symbol (``BTCUSD``) and the base (``BTC``).
     """
     api = getattr(getattr(strategy, "broker", None), "api", None)
 
@@ -50,7 +76,50 @@ def alpaca_positions_by_symbol(strategy: Any) -> dict[str, Any]:
         log.warning("broker.api unavailable - skipping position mark sync")
         return {}
 
-    return {str(pos.symbol).strip().upper(): pos for pos in api.get_all_positions()}
+    by_symbol: dict[str, Any] = {}
+
+    for pos in api.get_all_positions():
+        raw = str(pos.symbol).strip().upper()
+        base = normalize_symbol(raw)
+        by_symbol[raw] = pos
+        by_symbol[base] = pos
+
+    return by_symbol
+
+
+def finalize_filled_trade(
+    strategy_name: str,
+    trade_id: str,
+    *,
+    symbol: str,
+    average_fill_price: float,
+    filled_at: datetime,
+    broker_position: Any | None,
+) -> str | None:
+    """Close the ledger row, mark the idea filled when linked, sync portfolio.
+
+    Shared by live fill hooks and the reconcile pass so both paths stay
+    identical. Returns the idea_id when one was linked.
+    """
+    idea_id = complete_order(
+        strategy_name,
+        trade_id,
+        average_fill_price=average_fill_price,
+        filled_at=filled_at,
+    )
+
+    if idea_id is not None:
+        update_idea_status(strategy_name, idea_id, "filled")
+
+    sync_portfolio_from_fill(
+        strategy_name,
+        broker_position,
+        symbol=symbol,
+        idea_id=idea_id,
+        filled_at=filled_at,
+    )
+
+    return idea_id
 
 
 def sync_portfolio_from_fill(
@@ -63,13 +132,15 @@ def sync_portfolio_from_fill(
 ) -> None:
     """Upsert or delete one strategy-owned portfolio row after a broker fill.
 
-    Quantity is always stored as a positive whole-share count; shorts use
-    ``side="short"`` rather than a negative quantity.
+    Quantity is stored as a positive size (whole shares or fractional crypto);
+    shorts use ``side="short"`` rather than a negative quantity. Symbols are
+    normalized so crypto pairs land under the base ticker.
     """
+    symbol = normalize_symbol(symbol)
     signed_qty = float(getattr(broker_position, "quantity", 0) or 0) if broker_position else 0.0
-    quantity = int(abs(signed_qty))
+    quantity = abs(signed_qty)
 
-    if broker_position is None or quantity <= 0:
+    if broker_position is None or not isfinite(quantity) or quantity <= 0:
         delete_position(strategy_name, symbol)
         log.info("%s: flat at broker - portfolio row removed", symbol)
         return
@@ -94,8 +165,12 @@ def sync_portfolio_from_fill(
     log.info("%s: portfolio upserted qty=%s side=%s", symbol, quantity, side)
 
 
-def sync_position_marks(strategy: Any, strategy_name: str) -> None:
-    """Stamp Alpaca unrealized marks onto one sleeve's Dynamo portfolio rows."""
+def sync_position_pnl(strategy: Any, strategy_name: str) -> None:
+    """Stamp Alpaca unrealized P&L marks onto one sleeve's Dynamo portfolio rows.
+
+    Joins the strategy book to broker positions by normalized symbol so equity
+    tickers and crypto bases (``BTC`` ↔ ``BTCUSD``) both resolve.
+    """
     book = load_positions(strategy_name)
 
     if book.empty:
@@ -110,7 +185,7 @@ def sync_position_marks(strategy: Any, strategy_name: str) -> None:
     updated = 0
 
     for row in book.to_dict(orient="records"):
-        symbol = str(row["symbol"]).strip().upper()
+        symbol = normalize_symbol(str(row["symbol"]))
         alpaca_pos = broker_by_symbol.get(symbol)
 
         if alpaca_pos is None:
@@ -137,7 +212,7 @@ def sync_position_marks(strategy: Any, strategy_name: str) -> None:
         updated += 1
 
     log.info(
-        "Synced marks for %s/%s portfolio positions (%s)",
+        "Synced position PnL for %s/%s portfolio positions (%s)",
         updated,
         len(book),
         strategy_name,

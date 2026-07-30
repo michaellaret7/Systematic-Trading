@@ -1,8 +1,10 @@
 """DynamoDB trade ledger: one item per market entry order.
 
 Each item is created before broker submission with the full ``target_quantity``
-and zero fills. A broker completion event closes the item with the order's full
-quantity, average fill price, total cost, and fill timestamp.
+and zero fills. A broker completion event (or reconcile pass) closes the item
+with the order's full quantity, average fill price, total cost, and fill
+timestamp. ``broker_order_id`` is attached after submission so restarts can
+reconcile fills without the in-memory map.
 
 Items are keyed by ``strategy`` (partition) and ``trade_id`` (sort);
 ``trade_id`` starts with the ISO submission timestamp so a query returns
@@ -46,6 +48,13 @@ def _load_order(table: Any, strategy: str, trade_id: str) -> dict:
     return item
 
 
+def _idea_id_from_item(item: dict) -> str | None:
+    """Return the linked idea_id when present."""
+    idea_id = item.get("idea_id")
+
+    return str(idea_id) if idea_id is not None else None
+
+
 def record_order(order: TradeOrder) -> str:
     """Create one market entry in the ledger; return its trade ID.
 
@@ -79,21 +88,38 @@ def record_order(order: TradeOrder) -> str:
     return trade_id
 
 
+def attach_broker_order_id(strategy: str, trade_id: str, broker_order_id: str) -> None:
+    """Persist the broker's order id so reconcile can close the row after restart."""
+    if not broker_order_id.strip():
+        raise ValueError("broker_order_id must not be empty")
+
+    get_table(TABLE_NAME).update_item(
+        Key={"strategy": strategy, "trade_id": trade_id},
+        UpdateExpression="SET broker_order_id = :b",
+        ExpressionAttributeValues={":b": broker_order_id},
+    )
+
+
 def complete_order(
     strategy: str,
     trade_id: str,
     average_fill_price: float,
     filled_at: datetime,
 ) -> str | None:
-    """Close one ledger row from the broker's fully-filled order event.
+    """Close one ledger row from a fully-filled broker order.
 
-    Returns the linked ``idea_id`` when present, otherwise ``None``.
+    Idempotent: if ``filled_at`` is already set, returns the stored idea_id
+    without rewriting. Returns the linked ``idea_id`` when present.
     """
     if not isfinite(average_fill_price) or average_fill_price <= 0:
         raise ValueError("average_fill_price must be positive")
 
     table = get_table(TABLE_NAME)
     item = _load_order(table, strategy, trade_id)
+
+    if item.get("filled_at"):
+        return _idea_id_from_item(item)
+
     filled_quantity = Decimal(str(item["target_quantity"]))
     filled_price = Decimal(str(average_fill_price))
 
@@ -111,9 +137,14 @@ def complete_order(
         },
     )
 
-    idea_id = item.get("idea_id")
+    return _idea_id_from_item(item)
 
-    return str(idea_id) if idea_id is not None else None
+
+def load_open_orders(strategy: str) -> list[dict]:
+    """Ledger rows for one strategy that are not yet fully filled."""
+    items = query_all(get_table(TABLE_NAME), Key("strategy").eq(strategy))
+
+    return [item for item in items if not item.get("filled_at")]
 
 
 def load_trades(strategy: str | None = None) -> pd.DataFrame:

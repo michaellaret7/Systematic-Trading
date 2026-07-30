@@ -14,6 +14,7 @@ class FilledHookContext:
 
     is_backtesting = False
     trade_ids_by_symbol = {"AAPL": "trade-aapl"}
+    trade_ids_by_order_id = {"alpaca-order-aapl": "trade-aapl"}
 
     @staticmethod
     def get_datetime() -> datetime:
@@ -25,14 +26,6 @@ class IterationContext:
     """Minimal strategy state required by ``on_trading_iteration``."""
 
     is_backtesting = False
-
-    def __init__(self, api: object | None = None) -> None:
-        self.broker = SimpleNamespace(api=api)
-
-    @staticmethod
-    def get_datetime() -> datetime:
-        """Return a stable mark timestamp."""
-        return datetime(2026, 7, 30, 16, 0, tzinfo=timezone.utc)
 
 
 class InitializeContext:
@@ -51,58 +44,26 @@ def test_initialize_sets_daily_cadence() -> None:
     CsfChampions.initialize(context)
 
     assert context.sleeptime == "1D"
+    assert context.trade_ids_by_symbol == {}
+    assert context.trade_ids_by_order_id == {}
 
 
-def test_filled_hook_completes_ledger_idea_and_portfolio(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Final fill closes ledger + idea and delegates portfolio book sync."""
-    completion_calls: list[tuple[str, str, float, datetime]] = []
-    idea_updates: list[tuple[str, str, str]] = []
-    portfolio_calls: list[dict] = []
+def test_filled_hook_finalizes_ledger_and_portfolio(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Final fill closes ledger + idea and upserts the open portfolio row."""
+    finalize_calls: list[dict] = []
 
-    def fake_complete_order(
-        strategy_name: str,
-        trade_id: str,
-        average_fill_price: float,
-        filled_at: datetime,
-    ) -> str:
-        completion_calls.append((strategy_name, trade_id, average_fill_price, filled_at))
+    def fake_finalize(strategy_name, trade_id, **kwargs) -> str:
+        finalize_calls.append({"strategy": strategy_name, "trade_id": trade_id, **kwargs})
         return "idea-aapl"
 
-    def fake_sync_portfolio_from_fill(strategy_name: str, broker_position, **kwargs) -> None:
-        portfolio_calls.append(
-            {
-                "strategy": strategy_name,
-                "broker_position": broker_position,
-                **kwargs,
-            }
-        )
-
-    monkeypatch.setattr(strategy_module, "complete_order", fake_complete_order)
-    monkeypatch.setattr(
-        strategy_module,
-        "update_idea_status",
-        lambda strategy_name, idea_id, status: idea_updates.append(
-            (strategy_name, idea_id, status)
-        ),
-    )
-    monkeypatch.setattr(
-        strategy_module,
-        "sync_portfolio_from_fill",
-        fake_sync_portfolio_from_fill,
-    )
+    monkeypatch.setattr(strategy_module, "finalize_filled_trade", fake_finalize)
 
     order = SimpleNamespace(
         asset=SimpleNamespace(symbol="AAPL"),
         identifier="alpaca-order-aapl",
         avg_fill_price=101.25,
     )
-    broker_position = SimpleNamespace(
-        quantity=40,
-        side="long",
-        avg_fill_price=101.25,
-    )
+    broker_position = SimpleNamespace(quantity=40, side="long", avg_fill_price=101.25)
 
     CsfChampions.on_filled_order(
         FilledHookContext(),
@@ -113,22 +74,14 @@ def test_filled_hook_completes_ledger_idea_and_portfolio(
         multiplier=1.0,
     )
 
-    assert completion_calls == [
-        (
-            "csf_champions",
-            "trade-aapl",
-            101.25,
-            datetime(2026, 7, 30, 9, 31, tzinfo=timezone.utc),
-        )
-    ]
-    assert idea_updates == [("csf_champions", "idea-aapl", "filled")]
-    assert portfolio_calls == [
+    assert finalize_calls == [
         {
             "strategy": "csf_champions",
-            "broker_position": broker_position,
+            "trade_id": "trade-aapl",
             "symbol": "AAPL",
-            "idea_id": "idea-aapl",
+            "average_fill_price": 101.25,
             "filled_at": datetime(2026, 7, 30, 9, 31, tzinfo=timezone.utc),
+            "broker_position": broker_position,
         }
     ]
 
@@ -139,18 +92,8 @@ def test_filled_hook_skips_portfolio_in_backtest(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(
         strategy_module,
-        "complete_order",
-        lambda *a, **k: called.append("complete") or "idea",
-    )
-    monkeypatch.setattr(
-        strategy_module,
-        "update_idea_status",
-        lambda *a, **k: called.append("idea"),
-    )
-    monkeypatch.setattr(
-        strategy_module,
-        "sync_portfolio_from_fill",
-        lambda *a, **k: called.append("portfolio"),
+        "finalize_filled_trade",
+        lambda *a, **k: called.append("finalize"),
     )
 
     context = FilledHookContext()
@@ -173,48 +116,47 @@ def test_filled_hook_skips_portfolio_in_backtest(monkeypatch: pytest.MonkeyPatch
     assert called == []
 
 
-def test_trading_iteration_calls_shared_mark_sync(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Daily iteration delegates mark refresh to the shared portfolio helper."""
-    calls: list[tuple[object, str]] = []
+def test_trading_iteration_reconciles_then_syncs_marks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Daily iteration reconciles missed fills before refreshing marks."""
+    calls: list[str] = []
 
     monkeypatch.setattr(strategy_module.log, "info", lambda *a, **k: None)
     monkeypatch.setattr(
         strategy_module,
-        "sync_position_marks",
-        lambda strategy, strategy_name: calls.append((strategy, strategy_name)),
+        "reconcile_open_orders",
+        lambda strategy, strategy_name: calls.append(f"reconcile:{strategy_name}"),
+    )
+    monkeypatch.setattr(
+        strategy_module,
+        "sync_position_pnl",
+        lambda strategy, strategy_name: calls.append(f"pnl:{strategy_name}"),
     )
 
-    context = IterationContext()
-    CsfChampions.on_trading_iteration(context)
+    CsfChampions.on_trading_iteration(IterationContext())
 
-    assert calls == [(context, "csf_champions")]
+    assert calls == ["reconcile:csf_champions", "pnl:csf_champions"]
 
 
-def test_trading_iteration_skips_marks_in_backtest(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Backtests do not touch the portfolio mark columns."""
+def test_trading_iteration_skips_live_side_effects_in_backtest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backtests do not reconcile ledger rows or stamp marks."""
     called: list[str] = []
 
     monkeypatch.setattr(strategy_module.log, "info", lambda *a, **k: None)
     monkeypatch.setattr(
         strategy_module,
-        "sync_position_marks",
-        lambda *a, **k: called.append("marks"),
+        "reconcile_open_orders",
+        lambda *a, **k: called.append("reconcile"),
+    )
+    monkeypatch.setattr(
+        strategy_module,
+        "sync_position_pnl",
+        lambda *a, **k: called.append("pnl"),
     )
 
     context = IterationContext()
     context.is_backtesting = True
-
     CsfChampions.on_trading_iteration(context)
 
     assert called == []
-
-
-def test_trading_iteration_logs_daily_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The daily iteration remains active without submitting more orders."""
-    messages: list[str] = []
-    monkeypatch.setattr(strategy_module.log, "info", lambda message, *a: messages.append(message))
-    monkeypatch.setattr(strategy_module, "sync_position_marks", lambda *a, **k: None)
-
-    CsfChampions.on_trading_iteration(IterationContext())
-
-    assert messages[0] == "CSF Champions daily trading iteration"

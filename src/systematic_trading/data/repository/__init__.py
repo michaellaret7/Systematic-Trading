@@ -43,7 +43,9 @@ from systematic_trading.data.repository.ideas import (
     update_idea_status,
 )
 from systematic_trading.data.repository.ledger import (
+    attach_broker_order_id,
     complete_order,
+    load_open_orders,
     load_trades,
     record_order,
 )
@@ -65,12 +67,14 @@ __all__ = [
     "PERIODS",
     "STATEMENTS",
     "apply_broker_position",
+    "attach_broker_order_id",
     "complete_order",
     "count_ideas_since",
     "daily_prices_uri",
     "delete_position",
     "load_daily_prices",
     "load_ideas",
+    "load_open_orders",
     "load_panel",
     "load_positions",
     "load_sector_tags",

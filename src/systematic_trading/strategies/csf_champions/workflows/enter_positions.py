@@ -2,14 +2,20 @@
 
 Each holding is sized into whole shares from the broker's latest price and
 submitted as a DAY market order. Live and paper orders are recorded before
-submission so an immediate fill can always resolve its trade-ledger row.
+submission so an immediate market fill can always resolve its trade-ledger
+row. The broker order id is attached after submit so reconcile works after
+restarts and when Lumibot drops startup fill events.
 """
 
 import math
 
 from lumibot.strategies import Strategy
 
-from systematic_trading.data.repository import record_order, update_idea_status
+from systematic_trading.data.repository import (
+    attach_broker_order_id,
+    record_order,
+    update_idea_status,
+)
 from systematic_trading.domain.trades import TradeOrder
 from systematic_trading.logging_setup import get_logger
 from systematic_trading.strategies.csf_champions.portfolio import Holding, Portfolio
@@ -71,17 +77,31 @@ def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> 
         trade_id = record_order(
             TradeOrder(
                 strategy=STRATEGY,
-                idea_id=holding.idea_id,
                 symbol=holding.ticker,
                 side="buy",
                 target_quantity=quantity,
                 submitted_at=strategy.get_datetime(),
+                idea_id=holding.idea_id,
             )
         )
         strategy.trade_ids_by_symbol[holding.ticker] = trade_id
         update_idea_status(STRATEGY, holding.idea_id, "executed")
 
-    strategy.submit_order(order)
+        strategy.submit_order(order)
+
+        order_id = str(order.identifier) if getattr(order, "identifier", None) else ""
+
+        if order_id:
+            attach_broker_order_id(STRATEGY, trade_id, order_id)
+            strategy.trade_ids_by_order_id[order_id] = trade_id
+        else:
+            log.warning(
+                "%s: no broker order id after submit - ledger %s relies on reconcile",
+                holding.ticker,
+                trade_id,
+            )
+    else:
+        strategy.submit_order(order)
 
     target_dollars = holding.weight_pct / 100 * account_value
     log.info(

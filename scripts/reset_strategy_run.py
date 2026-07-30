@@ -1,8 +1,9 @@
 """Reset one strategy's DynamoDB state back to a fresh pre-execution slate.
 
 Deletes every ``trade-ledger`` row for the strategy (orders and their fill
-state) and moves every ``trade-ideas`` row back to ``pending``, which is the
-state the agent submits them in. Everything else on an idea — score, thesis,
+state), deletes every ``portfolio`` row for the strategy (open book positions),
+and moves every ``trade-ideas`` row back to ``pending``, which is the state
+the agent submits them in. Everything else on an idea — score, thesis,
 reference price — is written once at submission and never mutated, so status
 is the only field execution dirties.
 
@@ -37,6 +38,7 @@ from systematic_trading.data.repository.dynamo import get_table, query_all
 from systematic_trading.data.repository.ideas import TABLE_NAME as IDEAS_TABLE
 from systematic_trading.data.repository.ideas import update_idea_status
 from systematic_trading.data.repository.ledger import TABLE_NAME as LEDGER_TABLE
+from systematic_trading.data.repository.portfolio import TABLE_NAME as PORTFOLIO_TABLE
 
 
 #     ================================
@@ -79,6 +81,13 @@ def _ledger_trade_ids(strategy: str) -> list[str]:
     return [str(item["trade_id"]) for item in items]
 
 
+def _portfolio_symbols(strategy: str) -> list[str]:
+    """Every open portfolio symbol booked for one strategy."""
+    items = query_all(get_table(PORTFOLIO_TABLE), Key("strategy").eq(strategy))
+
+    return [str(item["symbol"]) for item in items]
+
+
 def _dirty_idea_ids(strategy: str) -> list[str]:
     """Ideas for one strategy that execution has moved off ``pending``."""
     items = query_all(
@@ -99,6 +108,15 @@ def _delete_ledger_rows(strategy: str, trade_ids: list[str]) -> None:
             batch.delete_item(Key={"strategy": strategy, "trade_id": trade_id})
 
 
+def _delete_portfolio_rows(strategy: str, symbols: list[str]) -> None:
+    """Remove the given portfolio rows, batching the deletes."""
+    table = get_table(PORTFOLIO_TABLE)
+
+    with table.batch_writer() as batch:
+        for symbol in symbols:
+            batch.delete_item(Key={"strategy": strategy, "symbol": symbol})
+
+
 def _reset_idea_statuses(strategy: str, idea_ids: list[str]) -> None:
     """Move the given ideas back to ``pending``."""
     for idea_id in idea_ids:
@@ -108,6 +126,7 @@ def _reset_idea_statuses(strategy: str, idea_ids: list[str]) -> None:
 def _confirm(
     strategy: str,
     ledger_count: int,
+    portfolio_count: int,
     idea_count: int,
     position_count: int,
     order_count: int,
@@ -120,6 +139,7 @@ def _confirm(
     print(f"    positions:   close {position_count:,} at market")
     print(f"    open orders: cancel {order_count:,}")
     print(f"  {LEDGER_TABLE}: delete {ledger_count:,} rows")
+    print(f"  {PORTFOLIO_TABLE}: delete {portfolio_count:,} rows")
     print(f"  {IDEAS_TABLE}: reset {idea_count:,} ideas to 'pending'")
 
     return input("Proceed? type 'yes' to confirm: ").strip().lower() == "yes"
@@ -144,15 +164,27 @@ def main() -> None:
     client = _broker_client()
 
     trade_ids = _ledger_trade_ids(strategy)
+    portfolio_symbols = _portfolio_symbols(strategy)
     idea_ids = _dirty_idea_ids(strategy)
     position_count, order_count = _broker_state(client)
 
-    if not trade_ids and not idea_ids and not position_count and not order_count:
+    if (
+        not trade_ids
+        and not portfolio_symbols
+        and not idea_ids
+        and not position_count
+        and not order_count
+    ):
         print(f"Nothing to reset for {strategy}.")
         return
 
     if not args.yes and not _confirm(
-        strategy, len(trade_ids), len(idea_ids), position_count, order_count
+        strategy,
+        len(trade_ids),
+        len(portfolio_symbols),
+        len(idea_ids),
+        position_count,
+        order_count,
     ):
         print("Aborted.")
         return
@@ -161,11 +193,14 @@ def main() -> None:
     # 'pending' while positions still exist would let the fill sweep re-fill them.
     _flatten_broker(client)
     _delete_ledger_rows(strategy, trade_ids)
+    _delete_portfolio_rows(strategy, portfolio_symbols)
     _reset_idea_statuses(strategy, idea_ids)
 
     print(
         f"Closed {position_count:,} positions and cancelled {order_count:,} orders; "
-        f"deleted {len(trade_ids):,} ledger rows; reset {len(idea_ids):,} ideas to 'pending'."
+        f"deleted {len(trade_ids):,} ledger rows; "
+        f"deleted {len(portfolio_symbols):,} portfolio rows; "
+        f"reset {len(idea_ids):,} ideas to 'pending'."
     )
 
 
