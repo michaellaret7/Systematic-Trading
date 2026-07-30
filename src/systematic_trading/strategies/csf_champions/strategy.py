@@ -5,8 +5,10 @@ generate trade ideas (only when ``generate_ideas`` is True), build the draft
 portfolio via the portfolio-constructor agent, then submit the book as
 whole-share market buys.
 
-Each fully-filled broker order closes its trade-ledger row and marks its source
-idea filled.
+Each fully-filled broker order closes its trade-ledger row, marks its source
+idea filled, and syncs the strategy-owned portfolio row to the post-fill
+broker size. Each live trading iteration refreshes unrealized marks from
+Alpaca onto existing portfolio rows.
 """
 
 from lumibot.entities import Order, Position
@@ -14,6 +16,7 @@ from lumibot.strategies import Strategy
 
 from systematic_trading.data.repository import complete_order, update_idea_status
 from systematic_trading.logging_setup import get_logger
+from systematic_trading.portfolio import sync_portfolio_from_fill, sync_position_marks
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 from systematic_trading.strategies.csf_champions.workflows.build_portfolio import (
     construct_portfolio,
@@ -28,11 +31,6 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
 
 log = get_logger(__name__)
 
-
-"""
-Threading queues (queue.Queue) are for passing tasks between threads in one process; if you want true parallelism across cores (relevant for CPU-bound strategy backtests),
-the same put/get pattern exists via multiprocessing.Queue for inter-process producer-consumer setups.
-"""
 
 class CsfChampions(Strategy):
     """CSF Champions: agent-scored fundamentals book, long-only sleeve."""
@@ -75,8 +73,11 @@ class CsfChampions(Strategy):
         enter_positions(self, self.portfolio)
 
     def on_trading_iteration(self) -> None:
-        """Log the daily strategy heartbeat."""
+        """Daily heartbeat: refresh unrealized marks from Alpaca."""
         log.info("CSF Champions daily trading iteration")
+
+        if not self.is_backtesting:
+            sync_position_marks(self, STRATEGY)
 
     def on_filled_order(
         self,
@@ -86,25 +87,34 @@ class CsfChampions(Strategy):
         quantity: float,
         multiplier: float,
     ) -> None:
-        """Close the ledger row and idea when one market order fully fills."""
+        """Close ledger + idea, then sync the strategy portfolio book."""
         if self.is_backtesting:
             return
 
-        trade_id = self.trade_ids_by_symbol.get(order.asset.symbol)
+        symbol = order.asset.symbol
+        trade_id = self.trade_ids_by_symbol.get(symbol)
 
         if trade_id is None:
             log.warning(
                 "%s: filled order %s has no trade-ledger row",
-                order.asset.symbol,
+                symbol,
                 order.identifier,
             )
             return
 
+        filled_at = self.get_datetime()
         idea_id = complete_order(
             STRATEGY,
             trade_id,
             average_fill_price=float(order.avg_fill_price or price),
-            filled_at=self.get_datetime(),
+            filled_at=filled_at,
         )
         update_idea_status(STRATEGY, idea_id, "filled")
-        log.info("%s: market order filled - idea marked filled", order.asset.symbol)
+        sync_portfolio_from_fill(
+            STRATEGY,
+            position,
+            symbol=symbol,
+            idea_id=idea_id,
+            filled_at=filled_at,
+        )
+        log.info("%s: market order filled - idea marked filled", symbol)

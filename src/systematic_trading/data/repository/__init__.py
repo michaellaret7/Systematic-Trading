@@ -48,6 +48,7 @@ from systematic_trading.data.repository.ledger import (
     record_order,
 )
 from systematic_trading.data.repository.portfolio import (
+    apply_broker_position,
     delete_position,
     load_positions,
     seed_position,
@@ -63,6 +64,7 @@ from systematic_trading.data.repository.prices import (
 __all__ = [
     "PERIODS",
     "STATEMENTS",
+    "apply_broker_position",
     "complete_order",
     "count_ideas_since",
     "daily_prices_uri",

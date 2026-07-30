@@ -5,6 +5,7 @@ and updated by a separate sync (strategy iteration or a seed job). Flat
 positions are deleted rather than stored at zero.
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 import pandas as pd
@@ -12,33 +13,80 @@ from boto3.dynamodb.conditions import Key
 
 from systematic_trading.config import is_paper
 from systematic_trading.data.repository.dynamo import get_table, query_all, scan_all
-from systematic_trading.domain.portfolio import Position, PositionMarks
+from systematic_trading.domain.portfolio import Position, PositionMarks, PositionSide
 
 TABLE_NAME = "portfolio"
 
 
 def upsert_position(position: Position) -> None:
-    """Write or overwrite one open position's book fields."""
-    item: dict = {
-        "strategy": position.strategy,
-        "symbol": position.symbol,
-        "side": position.side,
-        "quantity": position.quantity,
-        "avg_cost": Decimal(str(position.avg_cost)),
-        "opened_at": position.opened_at.isoformat(),
-        "updated_at": position.updated_at.isoformat(),
-        "paper": is_paper(),
+    """Write book fields for one open position without clearing mark columns.
+
+    ``opened_at`` and ``idea_id`` stick on first write via ``if_not_exists`` so
+    later fills can resize the row without erasing seed/open history or marks.
+    """
+    update_expression = (
+        "SET #side = :side, quantity = :q, avg_cost = :c, updated_at = :u, "
+        "paper = :p, opened_at = if_not_exists(opened_at, :o)"
+    )
+    values: dict = {
+        ":side": position.side,
+        ":q": position.quantity,
+        ":c": Decimal(str(position.avg_cost)),
+        ":u": position.updated_at.isoformat(),
+        ":p": is_paper(),
+        ":o": position.opened_at.isoformat(),
     }
 
     if position.idea_id is not None:
-        item["idea_id"] = position.idea_id
+        update_expression += ", idea_id = if_not_exists(idea_id, :idea)"
+        values[":idea"] = position.idea_id
 
-    get_table(TABLE_NAME).put_item(Item=item)
+    get_table(TABLE_NAME).update_item(
+        Key={"strategy": position.strategy, "symbol": position.symbol},
+        UpdateExpression=update_expression,
+        ExpressionAttributeNames={"#side": "side"},
+        ExpressionAttributeValues=values,
+    )
 
 
 def delete_position(strategy: str, symbol: str) -> None:
     """Remove one position row (position is flat at the broker)."""
     get_table(TABLE_NAME).delete_item(Key={"strategy": strategy, "symbol": symbol})
+
+
+def apply_broker_position(
+    strategy: str,
+    symbol: str,
+    *,
+    quantity: int,
+    side: PositionSide,
+    avg_cost: float,
+    now: datetime,
+    idea_id: str | None = None,
+) -> None:
+    """Sync one strategy-owned symbol to the post-fill broker size.
+
+    ``quantity <= 0`` deletes the row (flat). Otherwise validates through
+    ``Position`` and upserts book fields.
+    """
+    symbol = symbol.strip().upper()
+
+    if quantity <= 0:
+        delete_position(strategy, symbol)
+        return
+
+    upsert_position(
+        Position(
+            strategy=strategy,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            avg_cost=avg_cost,
+            opened_at=now,
+            updated_at=now,
+            idea_id=idea_id,
+        )
+    )
 
 
 def update_marks(marks: PositionMarks) -> None:

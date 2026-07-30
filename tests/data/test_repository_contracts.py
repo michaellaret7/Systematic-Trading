@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 
-from systematic_trading.data.repository import ideas, ledger
+from systematic_trading.data.repository import ideas, ledger, portfolio
 from systematic_trading.domain.ideas import TradeIdea
+from systematic_trading.domain.portfolio import Position, PositionMarks
 from systematic_trading.domain.trades import TradeOrder
 
 
@@ -152,3 +153,112 @@ def test_invalid_domain_records_fail_before_persistence() -> None:
 
     with pytest.raises(ValueError, match="idea_id"):
         replace(trade_order(), idea_id="  ")
+
+    with pytest.raises(ValueError, match="quantity"):
+        replace(open_position(), quantity=0)
+
+
+def open_position() -> Position:
+    """One valid open portfolio position."""
+    return Position(
+        strategy="csf_champions",
+        symbol="AAPL",
+        side="long",
+        quantity=40,
+        avg_cost=101.25,
+        opened_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        idea_id="2026-07-15T00:00:00+00:00#AAPL#61e26b27",
+    )
+
+
+def position_marks() -> PositionMarks:
+    """One valid Alpaca mark snapshot."""
+    return PositionMarks(
+        strategy="csf_champions",
+        symbol="AAPL",
+        unrealized_pl=12.5,
+        unrealized_plpc=0.025,
+        current_price=205.0,
+        market_value=8200.0,
+        mark_synced_at=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
+
+
+def test_apply_broker_position_upserts_book_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fill path writes book fields via update_item so marks are preserved."""
+    table = FakeTable()
+    monkeypatch.setattr(portfolio, "get_table", lambda name: table)
+    monkeypatch.setattr(portfolio, "is_paper", lambda: True)
+
+    portfolio.apply_broker_position(
+        "csf_champions",
+        "AAPL",
+        quantity=40,
+        side="long",
+        avg_cost=101.25,
+        now=datetime(2026, 7, 15, tzinfo=timezone.utc),
+        idea_id="idea-aapl",
+    )
+
+    assert table.update_kwargs is not None
+    assert table.update_kwargs["Key"] == {"strategy": "csf_champions", "symbol": "AAPL"}
+    values = table.update_kwargs["ExpressionAttributeValues"]
+    assert values[":q"] == 40
+    assert values[":c"] == Decimal("101.25")
+    assert values[":p"] is True
+    assert values[":idea"] == "idea-aapl"
+    assert "if_not_exists(opened_at" in table.update_kwargs["UpdateExpression"]
+
+
+def test_apply_broker_position_deletes_when_flat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A flat broker position removes the portfolio row."""
+    deleted: list[dict[str, str]] = []
+
+    class DeleteTable(FakeTable):
+        def delete_item(self, Key: dict[str, str]) -> None:  # noqa: N803
+            deleted.append(Key)
+
+    monkeypatch.setattr(portfolio, "get_table", lambda name: DeleteTable())
+
+    portfolio.apply_broker_position(
+        "csf_champions",
+        "AAPL",
+        quantity=0,
+        side="long",
+        avg_cost=101.25,
+        now=datetime(2026, 7, 15, tzinfo=timezone.utc),
+    )
+
+    assert deleted == [{"strategy": "csf_champions", "symbol": "AAPL"}]
+
+
+def test_update_marks_serializes_alpaca_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mark sync writes only observational columns."""
+    table = FakeTable()
+    monkeypatch.setattr(portfolio, "get_table", lambda name: table)
+
+    portfolio.update_marks(position_marks())
+
+    assert table.update_kwargs is not None
+    values = table.update_kwargs["ExpressionAttributeValues"]
+    assert values[":pl"] == Decimal("12.5")
+    assert values[":plpc"] == Decimal("0.025")
+    assert values[":px"] == Decimal("205.0")
+    assert values[":mv"] == Decimal("8200.0")
+    assert values[":t"] == "2026-07-16T00:00:00+00:00"
+
+
+def test_seed_position_writes_book_and_marks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bootstrap put includes book fields and the first mark snapshot."""
+    table = FakeTable()
+    monkeypatch.setattr(portfolio, "get_table", lambda name: table)
+    monkeypatch.setattr(portfolio, "is_paper", lambda: True)
+
+    portfolio.seed_position(open_position(), position_marks())
+
+    assert table.item is not None
+    assert table.item["quantity"] == 40
+    assert table.item["avg_cost"] == Decimal("101.25")
+    assert table.item["unrealized_plpc"] == Decimal("0.025")
+    assert table.item["paper"] is True
