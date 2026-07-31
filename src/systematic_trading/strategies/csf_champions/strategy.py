@@ -69,7 +69,8 @@ class CsfChampions(Strategy):
         """Drop agent-reviewed drawdowns whose two-week cooldown has expired."""
         # Drop all tickers that are expired out of the 2 week review window
         # if they are still in a drawdown, they will be reviewed again
-        prune_drawdown_reviews(self, self.portfolio)
+        # prune_drawdown_reviews(self, self.portfolio)
+        log.info("Before market opens: No drawdown reviews to prune")
 
     def on_trading_iteration(self) -> None:
         """Daily strategy heartbeat."""
@@ -77,4 +78,4 @@ class CsfChampions(Strategy):
 
         # check → review breaches → record only successful agent finishes
         # (no-ops while names are locked in drawdown_reviews)
-        manage_drawdowns(self, self.portfolio)
+        # manage_drawdowns(self, self.portfolio)
