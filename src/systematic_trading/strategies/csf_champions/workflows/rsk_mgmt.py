@@ -4,20 +4,38 @@ Reads open positions from Alpaca and flags holdings whose unrealized PnL has
 breached the drawdown threshold.
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import date, timedelta
 
+from agent_harness.sinks import LogSink
 from lumibot.strategies import Strategy
 
 from systematic_trading.logging_setup import get_logger
+from systematic_trading.strategies.csf_champions.agents.risk_manager.agent import (
+    build_risk_manager,
+)
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 
 log = get_logger(__name__)
 
 DRAWDOWN_THRESHOLD_PCT = -25.0
 DRAWDOWN_REVIEW_WINDOW_DAYS = 14
+MAX_WORKERS = 5
 
 # One breach row: ticker, unrealized pnl %, avg entry, strategy calendar day.
 DrawdownBreach = tuple[str, float, float, date]
+
+
+@dataclass(frozen=True, slots=True)
+class DrawdownDecision:
+    """Agent verdict for one breached ticker."""
+
+    ticker: str
+    action: str  # hold | trim | exit | add
+    reason: str
+    breach: DrawdownBreach
+    amount: float | None = None  # required when action is add or trim
 
 
 #     ================================
@@ -30,14 +48,9 @@ def check_for_drawdown_breaches(
     portfolio: Portfolio,
     threshold_pct: float = DRAWDOWN_THRESHOLD_PCT,
 ) -> list[DrawdownBreach]:
-    """Return new drawdown breaches, excluding tickers already under revision.
-
-    Pulls the live/paper book from Alpaca via ``strategy.broker.api``. PnL is
-    Alpaca's ``unrealized_plpc`` as a percent (e.g. ``-18.5`` means -18.5%).
-    Tickers already in ``portfolio.drawdown_revisions`` are omitted so the agent
-    does not see duplicates inside the review window.
-
-    Does not mutate ``drawdown_revisions`` — record only after the agent finishes.
+    """
+    Check if any names in the portfolio are below the drawdown threshold.
+    Return a list of tuples containing the ticker, pnl percentage, average entry price, and date of the breach.
     """
     positions = strategy.broker.api.get_all_positions()
     as_of = strategy.get_datetime().date()
@@ -46,8 +59,8 @@ def check_for_drawdown_breaches(
     for position in positions:
         ticker = position.symbol
 
-        # If already reviewed (in the revisions dict), skip it
-        if ticker in portfolio.drawdown_revisions:
+        # If already reviewed by the agent (still in cooldown), skip it
+        if ticker in portfolio.drawdown_reviews:
             continue
 
         # Calculate the PnL percentage
@@ -72,73 +85,141 @@ def check_for_drawdown_breaches(
 
     return breaches
 
-def prune_drawdown_revisions(
+def prune_drawdown_reviews(
     strategy: Strategy,
     portfolio: Portfolio,
     window_days: int = DRAWDOWN_REVIEW_WINDOW_DAYS,
 ) -> list[str]:
-    """Drop drawdown revisions older than the rolling window ending today.
-
-    Keeps entries whose revision date falls within the last ``window_days``
-    calendar days (inclusive of the cutoff day). Returns the tickers removed so
-    they can be re-reviewed if still in drawdown.
+    """
+    Remove tickers from the drawdown_reviews dict if they are older than the review window.
+    This means that the protected 2 week window has expired and the ticker can be reviewed again if it is still in a drawdown.
+    Return the list of tickers that were removed.
     """
     today = strategy.get_datetime().date()
     cutoff = today - timedelta(days=window_days)
     stale: list[str] = []
 
-    # Check if the revision date is older than the cutoff window
-    for ticker, (_, _, review_date) in portfolio.drawdown_revisions.items():
+    # Check if the review date is older than the cooldown window
+    for ticker, (_, _, review_date) in portfolio.drawdown_reviews.items():
         if review_date < cutoff:
             stale.append(ticker)
 
-    # Delete stale revisions from the portfolio so they can be reviewed again
+    # Delete expired reviews so they can be reviewed again
     for ticker in stale:
-        del portfolio.drawdown_revisions[ticker]
+        del portfolio.drawdown_reviews[ticker]
 
-    # Log the stale revisions
+    # Log the expired reviews
     if stale:
         log.info(
-            "pruned %d drawdown revision(s) older than %d days: %s",
+            "pruned %d drawdown review(s) older than %d days: %s",
             len(stale),
             window_days,
             ", ".join(stale),
         )
     else:
-        log.info("no drawdown revisions outside the %d-day window", window_days)
+        log.info("no drawdown reviews outside the %d-day cooldown", window_days)
 
     return stale
 
-def record_drawdown_revisions(
+def record_drawdown_reviews(
     portfolio: Portfolio,
     breaches: list[DrawdownBreach],
 ) -> None:
-    """Lock reviewed tickers into the revisions dict after the agent finishes.
+    """Mark tickers as agent-reviewed and start their cooldown window.
 
     Call this only once the agent has completed for the given breaches. Until
     then those tickers stay eligible for ``check_for_drawdown_breaches``.
     """
     for ticker, pnl_pct, _avg_entry, as_of in breaches:
-        portfolio.drawdown_revisions[ticker] = (ticker, pnl_pct, as_of)
+        portfolio.drawdown_reviews[ticker] = (ticker, pnl_pct, as_of)
 
     if breaches:
         log.info(
-            "recorded %d drawdown revision(s): %s",
+            "recorded %d drawdown review(s) (cooldown started): %s",
             len(breaches),
             ", ".join(ticker for ticker, *_ in breaches),
         )
 
-def drawdown_agent(tickers: list[tuple], portfolio: Portfolio, breaches: list[DrawdownBreach]):
-    """Run the drawdown agent on the drawdown breached tickers and return a decision for each one"""
+def _review_one(breach: DrawdownBreach) -> DrawdownDecision:
+    """Run a fresh risk-manager agent on one breach."""
+    # Unpack the breach tuple into its components
+    ticker, pnl_pct, avg_entry, as_of = breach
 
+    # Create agent instance of risk mngr agent (has to be built first)
+    agent = build_risk_manager()
+
+    task = (
+        f"Review drawdown on {ticker}: unrealized pnl {pnl_pct}%, "
+        f"avg entry ${avg_entry:.2f}, as of {as_of.isoformat()}. "
+        f"Return a decision: hold, trim, exit, or add, with a short reason. "
+        f"If add or trim, specify the amount."
+    )
+
+    result = agent.run(task, sink=LogSink(f"risk_{ticker}"))
+
+    return DrawdownDecision(
+        ticker=ticker,
+        action="reviewed",
+        reason=str(result).strip() if result else "agent finished",
+        breach=breach,
+        amount=None,
+    )
+
+
+def review_drawdowns(breaches: list[DrawdownBreach]) -> list[DrawdownDecision]:
+    """Run the drawdown agent on breached tickers; return a decision per success."""
     # ingest the list of tickers passed from the check_for_drawdown_breaches function
+    if not breaches:
+        return []
+
     # Create agent instance of risk mngr agent (has to be built first)
     # spawn the num workers per agent (each agent reviews one ticker)
-    # once the agents are spawned, wait for them to finish
-    # once the agents are finished, return the decisions
-    # add the viewed drawdown tickers to the drawdown_revisions dict via the record_drawdown_revisions function
+    log.info("reviewing %d drawdown breach(es) with %d workers", len(breaches), MAX_WORKERS)
 
-    pass
+    # Create an empty list to store the decisions
+    decisions: list[DrawdownDecision] = []
+
+    # once the agents are spawned, wait for them to finish
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(_review_one, breach): breach for breach in breaches}
+
+        for future in as_completed(futures):
+            breach = futures[future]
+            ticker = breach[0]
+
+            try:
+                # once the agents are finished, return the decisions
+                decisions.append(future.result())
+                log.info("%s drawdown review done", ticker)
+            except Exception:
+                log.exception("%s drawdown review failed — not recording", ticker)
+
+    return decisions
+
+# =========================================
+# --> Main workflow function
+# =========================================
+
+def manage_drawdowns(
+    strategy: Strategy,
+    portfolio: Portfolio,
+) -> list[DrawdownDecision]:
+    """Orchestrate check → parallel agent review → record successes only."""
+    # 1. check for drawdown breaches
+    breaches = check_for_drawdown_breaches(strategy, portfolio)
+
+    if not breaches:
+        return []
+
+    # 2. run the agent on the drawdown breached tickers
+    decisions = review_drawdowns(breaches)
+
+    # 2a. Once the agent is FINISHED running, add it to the drawdown_reviews dict
+    # add the viewed drawdown tickers to the drawdown_reviews dict via the record_drawdown_reviews function
+    completed = [decision.breach for decision in decisions]
+    record_drawdown_reviews(portfolio, completed)
+
+    return decisions
 
 
 """
@@ -149,7 +230,7 @@ the flow here should be:
   b. if there are, return a tuple of (ticker, pnl_pct) [maybe add the fill price and date here]
 
 2. run the agent on the drawdown breached tickers and return a decision for each one
-  a. Once the agent is FINISHED running, add it to the drawdown_revisions dict
+  a. Once the agent is FINISHED running, add it to the drawdown_reviews dict
 
 3. before market opens, drop all tickers that are expired from the 2 week review window so they can be reviewed again if they are still in a drawdown
 

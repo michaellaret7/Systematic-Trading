@@ -45,8 +45,9 @@ class Portfolio:
     def __init__(self) -> None:
         self.holdings: dict[str, Holding] = {}
         self.rejected: dict[str, tuple[Holding, str]] = {}
+        # Agent-reviewed drawdowns still in the cooldown window.
         # ticker → (ticker, drawdown_pct, review_date); date is calendar day only
-        self.drawdown_revisions: dict[str, tuple[str, float, date]] = {}
+        self.drawdown_reviews: dict[str, tuple[str, float, date]] = {}
 
 
     @property

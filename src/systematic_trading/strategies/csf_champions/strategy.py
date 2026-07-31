@@ -23,7 +23,8 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
     generate_trade_ideas,
 )
 from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import (
-    prune_drawdown_revisions,
+    manage_drawdowns,
+    prune_drawdown_reviews,
 )
 
 log = get_logger(__name__)
@@ -65,11 +66,15 @@ class CsfChampions(Strategy):
         enter_positions(self, self.portfolio)
 
     def before_market_opens(self) -> None:
-        """Drop drawdown revisions that have aged out of the two-week window."""
+        """Drop agent-reviewed drawdowns whose two-week cooldown has expired."""
         # Drop all tickers that are expired out of the 2 week review window
         # if they are still in a drawdown, they will be reviewed again
-        prune_drawdown_revisions(self, self.portfolio)
+        prune_drawdown_reviews(self, self.portfolio)
 
     def on_trading_iteration(self) -> None:
         """Daily strategy heartbeat."""
         log.info("CSF Champions daily trading iteration")
+
+        # check → review breaches → record only successful agent finishes
+        # (no-ops while names are locked in drawdown_reviews)
+        manage_drawdowns(self, self.portfolio)

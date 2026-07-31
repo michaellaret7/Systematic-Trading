@@ -238,6 +238,17 @@ def process_items(items: list[str], lookup: dict):
 
 - Module docstring explaining purpose.
 - Complete docstrings on public functions.
+- **Function docstrings: short, plain, direct.** Two short sentences max when possible — what it does, what it returns. No Args/Returns blocks, no implementation narration, no restating type hints. Example:
+
+  ```python
+  def check_for_drawdown_breaches(...):
+      """Check if any names in the portfolio are below the drawdown threshold.
+
+      Return a list of tuples containing the ticker, pnl percentage, average
+      entry price, and date of the breach.
+      """
+  ```
+
 - **Never delete user-authored comments.** Do not remove, rewrite, relocate, or "clean up" comments the user wrote — including inline notes, step markers, trailing flow/design blocks (e.g. module-level `"""..."""` plans), and TODO annotations. If a comment is factually wrong after a code change, fix the factual part in place; do not delete the comment. When rewriting a file, restore every pre-existing user comment. This overrides any default tendency to strip "narration" comments.
 - When editing a function, leave untouched comments exactly as they are unless the line they describe is itself being changed.
 - Helper functions live at the **top** of the file under a banner block:
