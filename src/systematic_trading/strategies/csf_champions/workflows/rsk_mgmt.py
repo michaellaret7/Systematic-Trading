@@ -5,7 +5,6 @@ breached the drawdown threshold.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import date, timedelta
 
 from agent_harness.sinks import LogSink
@@ -14,6 +13,9 @@ from lumibot.strategies import Strategy
 from systematic_trading.logging_setup import get_logger
 from systematic_trading.strategies.csf_champions.agents.risk_manager.agent import (
     build_risk_manager,
+)
+from systematic_trading.strategies.csf_champions.agents.risk_manager.models import (
+    DrawdownDecision,
 )
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 
@@ -25,17 +27,6 @@ MAX_WORKERS = 5
 
 # One breach row: ticker, unrealized pnl %, avg entry, strategy calendar day.
 DrawdownBreach = tuple[str, float, float, date]
-
-
-@dataclass(frozen=True, slots=True)
-class DrawdownDecision:
-    """Agent verdict for one breached ticker."""
-
-    ticker: str
-    action: str  # hold | trim | exit | add
-    reason: str
-    breach: DrawdownBreach
-    amount: float | None = None  # required when action is add or trim
 
 
 #     ================================
@@ -51,6 +42,7 @@ def check_for_drawdown_breaches(
     """
     Check if any names in the portfolio are below the drawdown threshold.
     Return a list of tuples containing the ticker, pnl percentage, average entry price, and date of the breach.
+    This will skip any tickers that have already been reviewed by the agent (still in cooldown dict in portfolio class).
     """
     positions = strategy.broker.api.get_all_positions()
     as_of = strategy.get_datetime().date()
@@ -85,15 +77,16 @@ def check_for_drawdown_breaches(
 
     return breaches
 
-def prune_drawdown_reviews(
+
+def clear_expired_drawdown_reviews(
     strategy: Strategy,
     portfolio: Portfolio,
     window_days: int = DRAWDOWN_REVIEW_WINDOW_DAYS,
 ) -> list[str]:
     """
     Remove tickers from the drawdown_reviews dict if they are older than the review window.
-    This means that the protected 2 week window has expired and the ticker can be reviewed again if it is still in a drawdown.
-    Return the list of tickers that were removed.
+    This means that the protected 2 week window has expired for the ticker and it can be reviewed again if still in a drawdown.
+    Return the list of tickers that were removed from the drawdown_reviews dict.
     """
     today = strategy.get_datetime().date()
     cutoff = today - timedelta(days=window_days)
@@ -111,7 +104,7 @@ def prune_drawdown_reviews(
     # Log the expired reviews
     if stale:
         log.info(
-            "pruned %d drawdown review(s) older than %d days: %s",
+            "cleared %d drawdown review(s) older than %d days: %s",
             len(stale),
             window_days,
             ", ".join(stale),
@@ -120,6 +113,7 @@ def prune_drawdown_reviews(
         log.info("no drawdown reviews outside the %d-day cooldown", window_days)
 
     return stale
+
 
 def record_drawdown_reviews(
     portfolio: Portfolio,
@@ -140,7 +134,8 @@ def record_drawdown_reviews(
             ", ".join(ticker for ticker, *_ in breaches),
         )
 
-def _review_one(breach: DrawdownBreach) -> DrawdownDecision:
+
+def _review_one(breach: DrawdownBreach) -> tuple[DrawdownBreach, DrawdownDecision]:
     """Run a fresh risk-manager agent on one breach."""
     # Unpack the breach tuple into its components
     ticker, pnl_pct, avg_entry, as_of = breach
@@ -157,16 +152,15 @@ def _review_one(breach: DrawdownBreach) -> DrawdownDecision:
 
     result = agent.run(task, sink=LogSink(f"risk_{ticker}"))
 
-    return DrawdownDecision(
-        ticker=ticker,
-        action="reviewed",
-        reason=str(result).strip() if result else "agent finished",
-        breach=breach,
-        amount=None,
-    )
+    if not isinstance(result, DrawdownDecision):
+        raise TypeError(f"risk manager must return DrawdownDecision, got {type(result).__name__}")
+
+    return breach, result
 
 
-def review_drawdowns(breaches: list[DrawdownBreach]) -> list[DrawdownDecision]:
+def review_drawdowns(
+    breaches: list[DrawdownBreach],
+) -> list[tuple[DrawdownBreach, DrawdownDecision]]:
     """Run the drawdown agent on breached tickers; return a decision per success."""
     # ingest the list of tickers passed from the check_for_drawdown_breaches function
     if not breaches:
@@ -177,7 +171,7 @@ def review_drawdowns(breaches: list[DrawdownBreach]) -> list[DrawdownDecision]:
     log.info("reviewing %d drawdown breach(es) with %d workers", len(breaches), MAX_WORKERS)
 
     # Create an empty list to store the decisions
-    decisions: list[DrawdownDecision] = []
+    results: list[tuple[DrawdownBreach, DrawdownDecision]] = []
 
     # once the agents are spawned, wait for them to finish
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -189,50 +183,43 @@ def review_drawdowns(breaches: list[DrawdownBreach]) -> list[DrawdownDecision]:
 
             try:
                 # once the agents are finished, return the decisions
-                decisions.append(future.result())
+                results.append(future.result())
                 log.info("%s drawdown review done", ticker)
             except Exception:
                 log.exception("%s drawdown review failed — not recording", ticker)
 
-    return decisions
+    return results
+
 
 # =========================================
 # --> Main workflow function
 # =========================================
 
+
 def manage_drawdowns(
     strategy: Strategy,
     portfolio: Portfolio,
-) -> list[DrawdownDecision]:
-    """Orchestrate check → parallel agent review → record successes only."""
-    # 1. check for drawdown breaches
+) -> list[tuple[DrawdownBreach, DrawdownDecision]]:
+    """Review drawdowns, record successes, and return actionable order instructions."""
+
+    # 1. check for drawdown breaches in the portfolio (broker api)
     breaches = check_for_drawdown_breaches(strategy, portfolio)
 
     if not breaches:
         return []
 
-    # 2. run the agent on the drawdown breached tickers
-    decisions = review_drawdowns(breaches)
+    # 2. run the agent on the freshly drawdown identified tickers
+    results = review_drawdowns(breaches)
 
     # 2a. Once the agent is FINISHED running, add it to the drawdown_reviews dict
-    # add the viewed drawdown tickers to the drawdown_reviews dict via the record_drawdown_reviews function
-    completed = [decision.breach for decision in decisions]
+    # add the newly viewed drawdown tickers to the drawdown_reviews dict via the record_drawdown_reviews function
+    completed = [breach for breach, _decision in results]
+    orders = [
+        (breach, decision)
+        for breach, decision in results
+        if decision.action in {"trim", "exit", "add"}
+    ]
+
     record_drawdown_reviews(portfolio, completed)
 
-    return decisions
-
-
-"""
-the flow here should be:
-
-1. check for drawdown breaches
-  a. if there do not return tickers in the already reviewed dict
-  b. if there are, return a tuple of (ticker, pnl_pct) [maybe add the fill price and date here]
-
-2. run the agent on the drawdown breached tickers and return a decision for each one
-  a. Once the agent is FINISHED running, add it to the drawdown_reviews dict
-
-3. before market opens, drop all tickers that are expired from the 2 week review window so they can be reviewed again if they are still in a drawdown
-
-
-"""
+    return orders

@@ -23,8 +23,8 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
     generate_trade_ideas,
 )
 from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import (
+    clear_expired_drawdown_reviews,
     manage_drawdowns,
-    prune_drawdown_reviews,
 )
 
 log = get_logger(__name__)
@@ -69,8 +69,8 @@ class CsfChampions(Strategy):
         """Drop agent-reviewed drawdowns whose two-week cooldown has expired."""
         # Drop all tickers that are expired out of the 2 week review window
         # if they are still in a drawdown, they will be reviewed again
-        # prune_drawdown_reviews(self, self.portfolio)
-        log.info("Before market opens: No drawdown reviews to prune")
+        # clear_expired_drawdown_reviews(self, self.portfolio)
+        log.info("Before market opens: No expired drawdown reviews to clear")
 
     def on_trading_iteration(self) -> None:
         """Daily strategy heartbeat."""
