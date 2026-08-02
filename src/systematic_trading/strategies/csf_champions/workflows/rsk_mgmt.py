@@ -135,7 +135,7 @@ def record_drawdown_reviews(
         )
 
 
-def _review_one(breach: DrawdownBreach) -> tuple[DrawdownBreach, DrawdownDecision]:
+def _deploy_single_drawdown_agent(breach: DrawdownBreach) -> tuple[DrawdownBreach, DrawdownDecision]:
     """Run a fresh risk-manager agent on one breach."""
     # Unpack the breach tuple into its components
     ticker, pnl_pct, avg_entry, as_of = breach
@@ -175,7 +175,7 @@ def review_drawdowns(
 
     # once the agents are spawned, wait for them to finish
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(_review_one, breach): breach for breach in breaches}
+        futures = {pool.submit(_deploy_single_drawdown_agent, breach): breach for breach in breaches}
 
         for future in as_completed(futures):
             breach = futures[future]
