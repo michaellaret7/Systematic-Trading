@@ -78,6 +78,17 @@ SELF_DELETE = self_delete_snippet(
     token_var="DIGITALOCEAN_TOKEN",
 )
 
+# Strategy droplets only. Ubuntu's unattended-upgrades runs `needrestart`, which
+# restarts every service linked against an upgraded library — and libc6/openssl
+# land in nearly every security batch. On 2026-08-01 06:30 UTC it bounced
+# strategy.service twice inside one dpkg run; each bounce re-entered `initialize`
+# and the second submitted a second book of 25 market buys on top of a live one.
+# Security patching is not worth an unattended process restart on a machine that
+# places orders — a strategy droplet is short-lived and replaced, not maintained.
+NO_AUTO_UPGRADE_SNIPPET = """
+systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades 2>/dev/null || true
+"""
+
 
 #     ================================
 # --> Helper funcs
@@ -181,10 +192,14 @@ def strategy_user_data(job_name: str, strategy_name: str, branch: str) -> str:
     relaunches it when it exits, and ``enable`` brings it back after a droplet
     reboot without re-running the bootstrap. cloud-init runs user_data once per
     droplet, so a reboot would otherwise leave nothing to restart the strategy.
+
+    Automatic upgrades are disabled first (see ``NO_AUTO_UPGRADE_SNIPPET``) so
+    nothing outside this script can bounce the unit.
     """
     return f"""#!/bin/bash
 {CAPTURE_SNIPPET}
 {APT_SNIPPET}
+{NO_AUTO_UPGRADE_SNIPPET}
 {env_snippet()}
 {bootstrap_snippet(branch)}
 {log_sync_snippet(job_name)}
