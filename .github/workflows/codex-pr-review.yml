@@ -13,7 +13,7 @@ concurrency:
 jobs:
   codex-review:
     name: Codex PR Review
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && vars.PR_REVIEWER == 'codex'
     runs-on: ubuntu-latest
 
     permissions:
@@ -35,25 +35,68 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5.6-sol
           sandbox: read-only
           prompt: |
-            Review the pull request changes relative to the dev branch.
+            Run `git diff dev...HEAD` and review the changes.
 
-            Only report high-confidence issues involving:
-            - Correctness
-            - Security
-            - Data integrity
-            - Concurrency
+            Read `.claude/CLAUDE.md` first. It defines this repository's
+            architecture and development guidelines, and it is the standard
+            you are reviewing against.
+
+            ## Primary focus: design and simplicity
+
+            This is the main job. For every meaningful change, ask whether the
+            same result could be achieved with less code, fewer concepts, or
+            fewer moving parts, and challenge it when it could.
+
+            Flag:
+            - Anything more complex than the problem requires (KISS): clever
+              code where straightforward code would do, or a solution whose
+              complexity exceeds the problem it solves. If a simpler
+              implementation exists, describe it concretely.
+            - Speculative generality (YAGNI): configurability, flags, hooks,
+              abstractions, or parameters that no current caller uses.
+            - Duplicated logic (DRY): a new helper that reimplements something
+              already in the codebase. Search the repository before concluding
+              it is new.
+            - Single-use abstractions: a class, wrapper, factory, or layer of
+              indirection with exactly one caller and no clear reason to exist.
+            - Code that could simply be deleted. No part is the best part.
+            - Functions doing several unrelated things, or that would read more
+              clearly split apart or, conversely, inlined.
+            - Backwards-compatibility shims, dead branches, or defensive error
+              handling for scenarios that cannot occur.
+            - Missing or incorrect type hints, and unclear naming.
+
+            When you propose a simplification, show the shape of the better
+            version. A vague "this could be simpler" is not a useful finding.
+
+            ## Also flag
+
+            - Correctness bugs
+            - Security vulnerabilities
+            - Data integrity risks
+            - Concurrency and race conditions
             - Breaking API changes
             - Meaningful performance regressions
+            - Missing tests for important behavior
 
-            Ignore formatting, naming preferences, and minor style concerns.
+            ## Ignore
+
+            - Formatting and line length; ruff handles that
+            - Naming or style preferences with no readability impact
+            - Hypothetical problems without a realistic failure case
+            - Code not touched by this pull request, unless the change
+              duplicates it or should have reused it
 
             For every finding, include:
             - Severity
             - File and line
             - Explanation
-            - Suggested correction
+            - The simpler or corrected version
+
+            Only report high-confidence, actionable findings.
 
             If there are no significant issues, say:
             "No blocking issues found."

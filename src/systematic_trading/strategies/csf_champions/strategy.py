@@ -79,7 +79,7 @@ class CsfChampions(Strategy):
         # check → review breaches → record only successful agent finishes
         # (no-ops while names are locked in drawdown_reviews)
         # manage_drawdowns(self, self.portfolio)
-    
+
     def after_market_closes(self) -> None:
         """After market closes: check for new drawdown breaches and review them."""
         # If there are any open orders thaty expired, re enter them to be filled the next trading day
