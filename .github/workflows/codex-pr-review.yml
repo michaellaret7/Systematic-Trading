@@ -1,0 +1,84 @@
+name: Codex PR Review
+
+on:
+  pull_request:
+    branches:
+      - dev
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  codex-review:
+    name: Codex PR Review
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      review: ${{ steps.codex.outputs.final-message }}
+
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Codex review
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: read-only
+          prompt: |
+            Review the pull request changes relative to the dev branch.
+
+            Only report high-confidence issues involving:
+            - Correctness
+            - Security
+            - Data integrity
+            - Concurrency
+            - Breaking API changes
+            - Meaningful performance regressions
+
+            Ignore formatting, naming preferences, and minor style concerns.
+
+            For every finding, include:
+            - Severity
+            - File and line
+            - Explanation
+            - Suggested correction
+
+            If there are no significant issues, say:
+            "No blocking issues found."
+
+  post-review:
+    name: Post Codex Review
+    needs: codex-review
+    if: needs.codex-review.outputs.review != ''
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Post review comment
+        uses: actions/github-script@v7
+        env:
+          CODEX_REVIEW: ${{ needs.codex-review.outputs.review }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: process.env.CODEX_REVIEW,
+            });
