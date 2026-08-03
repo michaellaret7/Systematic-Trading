@@ -5,7 +5,7 @@ Lumibot's ``lumibot``, ``agent_harness``'s ``agent`` sink loggers, and ``agent_h
 own diagnostics. Each ships a different format. This module unifies them behind a single
 handler on the **root** logger, so everything that propagates up renders as:
 
-    HH:MM:SS | LEVEL    | source               | message
+    YYYY-MM-DD HH:MM:SS | LEVEL    | source               | message
 
 See ``docs/infrastructure/logging.md`` for the full design and the third-party quirks it
 works around (Lumibot re-configuring its logger on every call, ``agent_harness``
@@ -150,7 +150,7 @@ class _UnifiedFormatter(logging.Formatter):
     """The single definition of a log line. Multi-line messages indent to the message column."""
 
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = self.formatTime(record, "%H:%M:%S")
+        timestamp = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
         source = _source(record.name)
 
         prefix = f"{timestamp} | {record.levelname:<{_LEVEL_WIDTH}} | {source:<{_SOURCE_WIDTH}.{_SOURCE_WIDTH}} | "

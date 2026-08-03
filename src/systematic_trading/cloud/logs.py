@@ -4,7 +4,7 @@ The read side of the log pipeline whose write side lives in this package:
 ``bootstrap.py`` pipes each run to ``s3://<bucket>/logs/<job>/<stamp>/full.log`` and
 streams it to the ``CLOUDWATCH_LOG_GROUP`` group; this module reads either back.
 Both backends emit the same unified line format
-(``HH:MM:SS | LEVEL | source | message`` — see ``docs/infrastructure/logging.md``),
+(``YYYY-MM-DD HH:MM:SS | LEVEL | source | message`` — see ``docs/infrastructure/logging.md``),
 so one parser serves both.
 
 Three entry points, one per way to read:
@@ -43,7 +43,7 @@ __all__ = [
 
 # A record opens with a wall-clock stamp; every other line continues the one above
 # it (a wrapped message or a traceback). Straight from the logging.md parser rule.
-_RECORD_START = re.compile(r"^\d\d:\d\d:\d\d \| ")
+_RECORD_START = re.compile(r"^\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d \| ")
 
 # Continuation lines are aligned under the message column with "<spaces>| "; strip
 # that prefix to recover the original message text.
@@ -130,10 +130,10 @@ def _recent_stream(group: str, stream_prefix: str | None) -> str | None:
 def parse_records(lines: Iterable[str]) -> Iterator[LogEntry]:
     """Group raw log lines into records, folding continuation lines into the record above.
 
-    A line starting with ``HH:MM:SS | `` opens a record; anything else is a wrapped
-    message or traceback and joins the current record's ``message``. Each record is
-    yielded once the next one begins (and the last at end of stream). Lines before the
-    first record (lumibot's banner, bootstrap output) are dropped.
+    A line starting with ``YYYY-MM-DD HH:MM:SS | `` opens a record; anything else is a
+    wrapped message or traceback and joins the current record's ``message``. Each record
+    is yielded once the next one begins (and the last at end of stream). Lines before
+    the first record (lumibot's banner, bootstrap output) are dropped.
     """
     current: LogEntry | None = None
 

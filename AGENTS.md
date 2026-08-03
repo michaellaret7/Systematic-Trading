@@ -93,7 +93,7 @@ Shared LLM tools live in `agents/tools/`. Strategy-specific agent orchestration 
 
 `logging_setup.py` runs two channels so the console reads as a strategy narrative:
 - **Framework (`lumibot`)** — quieted to WARNING, with a deny-list (`NOISE_SUBSTRINGS`) dropping known non-actionable startup warnings.
-- **Strategy (`systematic_trading`)** — compact `HH:MM:SS | message` format via `get_logger(name)`.
+- **Strategy (`systematic_trading`)** — compact `YYYY-MM-DD HH:MM:SS | LEVEL | source | message` format via `get_logger(name)`.
 
 Call `configure_logging()` once at startup (it's idempotent), after `import lumibot`, before `trader.run_all()`. Lumibot's telemetry JSON is disabled separately via `LUMIBOT_TELEMETRY=false` in `.env`.
 

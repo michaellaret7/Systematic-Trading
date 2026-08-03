@@ -1,9 +1,9 @@
 """Parsing and filtering for the cloud log reader.
 
 Exercises the full parse flow on real-format log lines (the exact
-``HH:MM:SS | LEVEL | source | message`` shape the unified logger emits), covering
-the cases that matter: multi-line records folding a traceback into one entry, level
-filtering, padded columns, embedded pipes in a message, and pre-log noise. No
+``YYYY-MM-DD HH:MM:SS | LEVEL | source | message`` shape the unified logger emits),
+covering the cases that matter: multi-line records folding a traceback into one entry,
+level filtering, padded columns, embedded pipes in a message, and pre-log noise. No
 network, no S3, no CloudWatch — the S3/CloudWatch sources are thin boto3 wrappers
 around this parser.
 """
@@ -19,12 +19,12 @@ from systematic_trading.cloud.logs import _filtered  # noqa: PLC2701 — testing
 # one INFO message contains an embedded " | " pipe to prove the split is bounded.
 SAMPLE = [
     "Lumibot banner line before any record — must be dropped",
-    "15:46:30 | INFO     | analyst_LVS          | tool.start GetFundamentalStatement()",
-    "15:47:13 | INFO     | enter_positions      | LVS: buy 164 @ limit $45.29 | target 2.10%",
-    "15:47:13 | ERROR    | ticker_analyst_MSFT  | tool.end GetFundamentals error: 404",
-    "                                           | Traceback (most recent call last):",
-    "                                           |   ValueError: unknown symbol",
-    "15:47:44 | WARNING  | enter_positions      | MSFT: no price available — skipping entry",
+    "2026-07-22 15:46:30 | INFO     | analyst_LVS          | tool.start GetFundamentalStatement()",
+    "2026-07-22 15:47:13 | INFO     | enter_positions      | LVS: buy 164 @ limit $45.29 | target 2.10%",
+    "2026-07-22 15:47:13 | ERROR    | ticker_analyst_MSFT  | tool.end GetFundamentals error: 404",
+    "                                                      | Traceback (most recent call last):",
+    "                                                      |   ValueError: unknown symbol",
+    "2026-07-22 15:47:44 | WARNING  | enter_positions      | MSFT: no price available — skipping entry",
 ]
 
 
@@ -45,7 +45,7 @@ def test_columns_are_stripped_of_padding():
     first = next(parse_records(SAMPLE))
 
     assert first == LogEntry(
-        time="15:46:30",
+        time="2026-07-22 15:46:30",
         level="INFO",
         source="analyst_LVS",
         message="tool.start GetFundamentalStatement()",

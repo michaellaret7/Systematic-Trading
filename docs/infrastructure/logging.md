@@ -7,7 +7,7 @@ One log line format for the whole system, regardless of which subsystem emitted 
 A live run emits four formats from four independent logger trees:
 
 ```
-15:47:13 | Analyzing 47 tickers with 8 concurrent agents                 systematic_trading
+2026-07-22 15:47:13 | Analyzing 47 tickers with 8 concurrent agents      systematic_trading
 2026-07-22 15:47:13,923 | INFO | [CsfChampions] Order was filled: ...    lumibot
 15:46:54 INFO  agent.portfolio_constructor: turn.end iters=7 tools=97    agent        (agent_harness LogSink)
 sink LangfuseSink.on_turn_end raised: ...                                agent_harness (bare, via lastResort)
@@ -47,19 +47,19 @@ never touches `handler.filters`. Its records then reach root like everyone else'
 ## Record format
 
 ```
-HH:MM:SS | LEVEL    | source               | message
+YYYY-MM-DD HH:MM:SS | LEVEL    | source               | message
 ```
 
 ```
-15:46:30 | INFO     | analyst_LVS          | tool.start GetFundamentalStatement()
-15:47:13 | INFO     | enter_positions      | LVS: buy 164 @ limit $45.29 (target 2.10%)
-15:47:13 | INFO     | broker               | Order was filled: 164 LVS buy @ $45.29
-15:47:44 | WARNING  | enter_positions      | MSFT: no price available — skipping entry
+2026-07-22 15:46:30 | INFO     | analyst_LVS          | tool.start GetFundamentalStatement()
+2026-07-22 15:47:13 | INFO     | enter_positions      | LVS: buy 164 @ limit $45.29 (target 2.10%)
+2026-07-22 15:47:13 | INFO     | broker               | Order was filled: 164 LVS buy @ $45.29
+2026-07-22 15:47:44 | WARNING  | enter_positions      | MSFT: no price available — skipping entry
 ```
 
 | Column | Width | Rule |
 |---|---|---|
-| time | 8 | `%H:%M:%S`. The date lives in the S3 filename. |
+| time | 19 | `%Y-%m-%d %H:%M:%S` (UTC on cloud pods). Date is in the line so week-long runs sort cleanly without relying on the S3 path. |
 | level | 8 | Full name — `INFO`, `DEBUG`, `WARNING`, `ERROR`, `CRITICAL`. Never abbreviated. |
 | source | 20 | Derived from `record.name`; truncated at 20. |
 | message | — | Stripped, then verbatim. |
@@ -106,12 +106,12 @@ render as source `systematic_trading`. Give them `get_logger("live")` / `get_log
 Continuation lines are indented to the message column:
 
 ```
-15:46:54 | INFO     | build_portfolio      | Draft portfolio finalized:
-                                           | LVS    2.10%   $7,427   164 sh
+2026-07-22 15:46:54 | INFO     | build_portfolio      | Draft portfolio finalized:
+                                                      | LVS    2.10%   $7,427   164 sh
 ```
 
-**Parser rule:** a line matching `^\d\d:\d\d:\d\d \| ` starts a record; anything else
-continues the one above it.
+**Parser rule:** a line matching `^\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d \| ` starts a
+record; anything else continues the one above it.
 
 This is a common path, not an edge case. Sources:
 
