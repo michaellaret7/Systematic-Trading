@@ -40,7 +40,7 @@ def check_for_drawdown_breaches(
     threshold_pct: float = DRAWDOWN_THRESHOLD_PCT,
 ) -> list[DrawdownBreach]:
     """
-    Check if any names in the portfolio are below the drawdown threshold.
+    Check if any names in the portfolio are below the drawdown threshold (-25% right now).
     Return a list of tuples containing the ticker, pnl percentage, average entry price, and date of the breach.
     This will skip any tickers that have already been reviewed by the agent (still in cooldown dict in portfolio class).
     """
@@ -205,6 +205,7 @@ def manage_drawdowns(
     # 1. check for drawdown breaches in the portfolio (broker api)
     breaches = check_for_drawdown_breaches(strategy, portfolio)
 
+    # if there are no breaches, return an empty list
     if not breaches:
         return []
 

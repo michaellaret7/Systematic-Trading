@@ -67,10 +67,17 @@ class CsfChampions(Strategy):
 
     def before_market_opens(self) -> None:
         """Drop agent-reviewed drawdowns whose two-week cooldown has expired."""
-        # Drop all tickers that are expired out of the 2 week review window
-        # if they are still in a drawdown, they will be reviewed again
-        # clear_expired_drawdown_reviews(self, self.portfolio)
-        log.info("Before market opens: No expired drawdown reviews to clear")
+        
+        evicted = clear_expired_drawdown_reviews(self, self.portfolio)
+        if evicted:
+            log.info(
+                "Before market opens: evicted %d expired drawdown review(s): %s",
+                len(evicted),
+                ", ".join(sorted(evicted)),
+            )
+        else:
+            log.info("Before market opens: no expired drawdown reviews to evict")
+        
 
     def on_trading_iteration(self) -> None:
         """Daily strategy heartbeat."""
