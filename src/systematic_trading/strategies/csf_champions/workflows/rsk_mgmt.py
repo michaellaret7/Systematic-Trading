@@ -1,15 +1,21 @@
 """Risk management for the CSF Champions live book.
 
-Reads open positions from Alpaca and flags holdings whose unrealized PnL has
-breached the drawdown threshold.
+Reads open positions from Alpaca and flags holdings that have given back too
+much from their high-water mark. Measuring from cost alone is blind to a winner
+round-tripping: a name up 80% that falls 40% off its high is still positive on
+cost and would never alert.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 from agent_harness.sinks import LogSink
+from alpaca.common.enums import Sort
+from alpaca.trading.enums import QueryOrderStatus
+from alpaca.trading.requests import GetOrdersRequest
 from lumibot.strategies import Strategy
 
+from systematic_trading.data.repository import load_daily_prices
 from systematic_trading.logging_setup import get_logger
 from systematic_trading.strategies.csf_champions.agents.risk_manager.agent import (
     build_risk_manager,
@@ -25,13 +31,100 @@ DRAWDOWN_THRESHOLD_PCT = -25.0
 DRAWDOWN_REVIEW_WINDOW_DAYS = 14
 MAX_WORKERS = 5
 
-# One breach row: ticker, unrealized pnl %, avg entry, strategy calendar day.
-DrawdownBreach = tuple[str, float, float, date]
+# Fills pulled per symbol when dating the open position. Deep enough to reach
+# past the last flat point for any position this strategy holds.
+ENTRY_ORDER_LOOKUP_LIMIT = 500
+
+# Fractional-share tolerance when matching accumulated fills to position size.
+QTY_TOLERANCE = 1e-6
+
+# One breach row: ticker, give-back %, unrealized pnl %, avg entry, calendar day.
+DrawdownBreach = tuple[str, float, float, float, date]
 
 
 #     ================================
 # --> Helper funcs
 #     ================================
+
+
+def entry_date(api, symbol: str, position_qty: float) -> date | None:
+    """Date the currently open position was opened, from Alpaca's fill history.
+
+    Walks fills newest to oldest and returns the one where the running signed
+    quantity first equals the open position, i.e. the most recent point the
+    book was flat in this name. Returns None when no such point is found.
+    """
+    request = GetOrdersRequest(
+        status=QueryOrderStatus.CLOSED,
+        symbols=[symbol],
+        limit=ENTRY_ORDER_LOOKUP_LIMIT,
+        direction=Sort.DESC,
+    )
+
+    running = 0.0
+
+    for order in api.get_orders(filter=request):
+        if not order.filled_at or not order.filled_qty:
+            continue
+
+        # sell_short reaches the API as a plain sell, so side alone gives the sign.
+        # OrderSide is an enum whose str() is "OrderSide.BUY" — read .value instead.
+        side = str(getattr(order.side, "value", order.side)).lower()
+
+        signed = float(order.filled_qty) * (1.0 if side == "buy" else -1.0)
+        running += signed
+
+        if abs(running - position_qty) < QTY_TOLERANCE:
+            return order.filled_at.date()
+
+    return None
+
+
+def give_back_pct(
+    symbol: str,
+    opened_on: date,
+    avg_entry: float,
+    current_price: float,
+    is_short: bool,
+) -> float:
+    """Percent the price has moved against the position from its best level since entry.
+
+    The entry price joins the candidates as a floor, so a position never in
+    profit reports its plain unrealized PnL and can only alert earlier, never
+    later. Best is the highest price for a long, the lowest for a short.
+    """
+    history = load_daily_prices(symbols=[symbol], start=opened_on, columns=["date", "close"])
+
+    prices = [*history["close"].astype(float), current_price, avg_entry]
+    best = min(prices) if is_short else max(prices)
+
+    return (-1.0 if is_short else 1.0) * (current_price - best) / best * 100.0
+
+
+def _position_drawdown(api, position, ticker: str) -> tuple[float, float]:
+    """Give-back and unrealized PnL for one position, both in percent.
+
+    Falls back to unrealized PnL as the give-back when the open date cannot be
+    resolved — a risk check must never silently skip a position.
+    """
+    pnl_pct = round(float(position.unrealized_plpc) * 100.0, 2)
+
+    quantity = float(position.qty)
+    opened_on = entry_date(api, ticker, quantity)
+
+    if opened_on is None:
+        log.warning("%s: no flat point in fill history — falling back to unrealized pnl", ticker)
+        return pnl_pct, pnl_pct
+
+    give_back = give_back_pct(
+        symbol=ticker,
+        opened_on=opened_on,
+        avg_entry=float(position.avg_entry_price),
+        current_price=float(position.current_price),
+        is_short=quantity < 0,
+    )
+
+    return round(give_back, 2), pnl_pct
 
 
 def check_for_drawdown_breaches(
@@ -41,10 +134,14 @@ def check_for_drawdown_breaches(
 ) -> list[DrawdownBreach]:
     """
     Check if any names in the portfolio are below the drawdown threshold (-25% right now).
-    Return a list of tuples containing the ticker, pnl percentage, average entry price, and date of the breach.
+    Measured as give-back from the position's high-water mark, so a winner that
+    round-trips is caught as well as one that never worked.
+    Return a list of tuples containing the ticker, give-back percentage, unrealized pnl
+    percentage, average entry price, and date of the breach.
     This will skip any tickers that have already been reviewed by the agent (still in cooldown dict in portfolio class).
     """
-    positions = strategy.broker.api.get_all_positions()
+    api = strategy.broker.api
+    positions = api.get_all_positions()
     as_of = strategy.get_datetime().date()
     breaches: list[DrawdownBreach] = []
 
@@ -55,21 +152,21 @@ def check_for_drawdown_breaches(
         if ticker in portfolio.drawdown_reviews:
             continue
 
-        # Calculate the PnL percentage
-        pnl_pct = round(float(position.unrealized_plpc) * 100.0, 2)
+        # Give-back from the high-water mark, with unrealized pnl kept as context
+        give_back, pnl_pct = _position_drawdown(api, position, ticker)
 
-        # if the PnL is under the threshold, add it to the breaches list
-        if pnl_pct < threshold_pct:
+        # if the give-back is under the threshold, add it to the breaches list
+        if give_back < threshold_pct:
             avg_entry = float(position.avg_entry_price)
-            breaches.append((ticker, pnl_pct, avg_entry, as_of))
+            breaches.append((ticker, give_back, pnl_pct, avg_entry, as_of))
 
     if breaches:
         log.info(
             "drawdown breaches (threshold %.1f%%): %s",
             threshold_pct,
             ", ".join(
-                f"{ticker} {pnl_pct:.2f}% (entry ${avg_entry:.2f})"
-                for ticker, pnl_pct, avg_entry, _ in breaches
+                f"{ticker} give-back {give_back:.2f}% (pnl {pnl_pct:.2f}%, entry ${avg_entry:.2f})"
+                for ticker, give_back, pnl_pct, avg_entry, _ in breaches
             ),
         )
     else:
@@ -124,8 +221,8 @@ def record_drawdown_reviews(
     Call this only once the agent has completed for the given breaches. Until
     then those tickers stay eligible for ``check_for_drawdown_breaches``.
     """
-    for ticker, pnl_pct, _avg_entry, as_of in breaches:
-        portfolio.drawdown_reviews[ticker] = (ticker, pnl_pct, as_of)
+    for ticker, give_back, _pnl_pct, _avg_entry, as_of in breaches:
+        portfolio.drawdown_reviews[ticker] = (ticker, give_back, as_of)
 
     if breaches:
         log.info(
@@ -135,16 +232,19 @@ def record_drawdown_reviews(
         )
 
 
-def _deploy_single_drawdown_agent(breach: DrawdownBreach) -> tuple[DrawdownBreach, DrawdownDecision]:
+def _deploy_single_drawdown_agent(
+    breach: DrawdownBreach,
+) -> tuple[DrawdownBreach, DrawdownDecision]:
     """Run a fresh risk-manager agent on one breach."""
     # Unpack the breach tuple into its components
-    ticker, pnl_pct, avg_entry, as_of = breach
+    ticker, give_back, pnl_pct, avg_entry, as_of = breach
 
     # Create agent instance of risk mngr agent (has to be built first)
     agent = build_risk_manager()
 
     task = (
-        f"Review drawdown on {ticker}: unrealized pnl {pnl_pct}%, "
+        f"Review drawdown on {ticker}: {give_back}% below its best close "
+        f"since we opened it, unrealized pnl {pnl_pct}%, "
         f"avg entry ${avg_entry:.2f}, as of {as_of.isoformat()}. "
         f"Return a decision: hold, trim, exit, or add, with a short reason. "
         f"If add or trim, specify the amount."
@@ -175,7 +275,9 @@ def review_drawdowns(
 
     # once the agents are spawned, wait for them to finish
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(_deploy_single_drawdown_agent, breach): breach for breach in breaches}
+        futures = {
+            pool.submit(_deploy_single_drawdown_agent, breach): breach for breach in breaches
+        }
 
         for future in as_completed(futures):
             breach = futures[future]

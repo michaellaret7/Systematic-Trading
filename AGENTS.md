@@ -31,7 +31,7 @@ Key pages (consult these directly — they cover most day-to-day work):
 - **Alpaca broker** — https://lumibot.lumiwealth.com/brokers.alpaca.html — our broker: config dict shape, supported order types/sides, quirks.
 - **Examples** — https://lumibot.lumiwealth.com/examples.html — complete reference strategies showing idiomatic Lumibot patterns.
 
-**Important additional info** - To get a full overview/rundown of the lumibot library, read the LUMIBOT.md file in the .Codex folder
+**Important additional info** - To get a full overview/rundown of the lumibot library, read the LUMIBOT.md file in the .claude folder
 
 ## Architecture
 

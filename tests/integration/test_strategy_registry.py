@@ -33,3 +33,25 @@ def test_fmp_client_import_does_not_initialize_lumibot() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_strategy_package_import_does_not_initialize_lumibot() -> None:
+    """Importing strategy-package agents must not boot Lumibot via the registry."""
+    command = (
+        "import sys; "
+        "from systematic_trading.strategies import STRATEGIES; "
+        "assert 'csf_champions' in STRATEGIES; "
+        "assert list(STRATEGIES); "
+        "from systematic_trading.strategies.csf_champions.agents.risk_manager.agent import "
+        "build_risk_manager; "
+        "assert build_risk_manager; "
+        "assert 'lumibot' not in sys.modules"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr

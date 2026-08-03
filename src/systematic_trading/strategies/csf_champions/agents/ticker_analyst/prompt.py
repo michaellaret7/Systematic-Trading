@@ -123,9 +123,9 @@ Then analyze:
    what it has been doing?" A wonderful business at a fair price beats a
    fair business at a wonderful price — but even wonderful businesses can be
    priced for perfection; say so when they are. Statement-derived multiples
-   are stamped at fiscal period end and can be stale: call GetRecentPrices
-   for the last two weeks of daily bars and re-anchor your valuation on the
-   latest close before judging today's price.
+   are stamped at fiscal period end and can be stale: call GetPrices for the
+   last two weeks of daily bars and re-anchor your valuation on the latest
+   close before judging today's price.
 
 ## Phase 3 — Synthesis and scoring
 
