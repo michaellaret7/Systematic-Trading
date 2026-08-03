@@ -5,6 +5,13 @@ generate trade ideas (only when ``generate_ideas`` is True), build the draft
 portfolio via the portfolio-constructor agent, then submit the book as
 whole-share market buys on Alpaca.
 
+Daily risk loop:
+- ``before_market_opens`` — drop expired drawdown cooldowns
+- ``on_trading_iteration`` — submit any pending risk orders from the prior
+  after-close review (sells before buys)
+- ``after_market_closes`` — run the drawdown agent and stash actionable orders
+  for the next session
+
 Broker state (positions, fills, cash) is read from Alpaca. DynamoDB is used
 only for the trade-ideas queue.
 """
@@ -23,8 +30,13 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
     generate_trade_ideas,
 )
 from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import (
+    DrawdownBreach,
+    apply_drawdown_orders,
     clear_expired_drawdown_reviews,
     manage_drawdowns,
+)
+from systematic_trading.strategies.csf_champions.agents.risk_manager.models import (
+    DrawdownDecision,
 )
 
 log = get_logger(__name__)
@@ -41,12 +53,16 @@ class CsfChampions(Strategy):
     }
 
     def initialize(self) -> None:
-        # Run the strategy heartbeat once per trading day.
+        # Intraday heartbeat; risk research itself runs once after the close.
         self.sleeptime = "2H"
 
         # The draft book is stateful across the whole strategy run: created
         # empty here, seeded and shaped by build_portfolio, read by submission.
         self.portfolio = Portfolio()
+
+        # Actionable drawdown decisions from the prior after-close review;
+        # applied on the next session's first trading iteration.
+        self.pending_drawdown_orders: list[tuple[DrawdownBreach, DrawdownDecision]] = []
 
         # The flag is the single switch: only run the startup pipeline
         # (idea generation, construction, submission) when explicitly asked.
@@ -67,8 +83,8 @@ class CsfChampions(Strategy):
 
     def before_market_opens(self) -> None:
         """Drop agent-reviewed drawdowns whose two-week cooldown has expired."""
-        
         evicted = clear_expired_drawdown_reviews(self, self.portfolio)
+
         if evicted:
             log.info(
                 "Before market opens: evicted %d expired drawdown review(s): %s",
@@ -77,16 +93,36 @@ class CsfChampions(Strategy):
             )
         else:
             log.info("Before market opens: no expired drawdown reviews to evict")
-        
 
     def on_trading_iteration(self) -> None:
-        """Daily strategy heartbeat."""
-        log.info("CSF Champions daily trading iteration")
+        """Intraday heartbeat: apply any pending risk orders, nothing else."""
+        log.info("CSF Champions trading iteration")
 
-        # check → review breaches → record only successful agent finishes
-        # (no-ops while names are locked in drawdown_reviews)
-        # manage_drawdowns(self, self.portfolio)
+        if not self.pending_drawdown_orders:
+            log.info("No pending drawdown orders to apply")
+            return
+
+        pending = self.pending_drawdown_orders
+        self.pending_drawdown_orders = []
+
+        log.info(
+            "Applying %d pending drawdown order(s) from prior close review",
+            len(pending),
+        )
+        apply_drawdown_orders(self, pending)
 
     def after_market_closes(self) -> None:
-        """After market closes: check for new drawdown breaches and review them."""
-        # If there are any open orders thaty expired, re enter them to be filled the next trading day
+        """After close: review new drawdown breaches; stash orders for next open."""
+        log.info("After market closes: running drawdown risk review")
+
+        orders = manage_drawdowns(self, self.portfolio)
+        self.pending_drawdown_orders = orders
+
+        if orders:
+            log.info(
+                "After market closes: %d actionable drawdown order(s) queued for next session: %s",
+                len(orders),
+                ", ".join(f"{decision.ticker}:{decision.action}" for _breach, decision in orders),
+            )
+        else:
+            log.info("After market closes: no actionable drawdown orders")

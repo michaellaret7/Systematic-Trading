@@ -378,5 +378,4 @@ def get_market_context(
     )
 
 
-if __name__ == "__main__":
-    print(get_market_context(ticker="ADBE"))
+

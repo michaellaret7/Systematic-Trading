@@ -326,3 +326,99 @@ def manage_drawdowns(
     record_drawdown_reviews(portfolio, completed)
 
     return orders
+
+
+def apply_drawdown_orders(
+    strategy: Strategy,
+    orders: list[tuple[DrawdownBreach, DrawdownDecision]],
+) -> int:
+    """Submit market orders for prior-session drawdown decisions.
+
+    Sells (trim / exit) go first so cash is free before any adds. Returns the
+    number of orders submitted.
+    """
+    if not orders:
+        log.info("no pending drawdown orders to apply")
+        return 0
+
+    # Resolve share quantities first; skip anything that cannot size cleanly.
+    sells: list[tuple[str, int, str]] = []
+    buys: list[tuple[str, int, str]] = []
+
+    for _breach, decision in orders:
+        ticker = decision.ticker.strip().upper()
+        position = strategy.get_position(ticker)
+        held = abs(float(position.quantity)) if position is not None else 0.0
+
+        if held <= 0:
+            log.warning("%s: no open position — skipping %s", ticker, decision.action)
+            continue
+
+        if decision.action == "exit":
+            qty = int(held)
+            if qty > 0:
+                sells.append((ticker, qty, "exit"))
+            continue
+
+        if decision.action == "trim":
+            if decision.amount is None or not (0.0 < decision.amount < 1.0):
+                log.warning(
+                    "%s: trim needs 0 < amount < 1, got %s — skipping",
+                    ticker,
+                    decision.amount,
+                )
+                continue
+
+            qty = int(held * decision.amount)
+            if qty <= 0:
+                log.warning("%s: trim sizes to zero whole shares — skipping", ticker)
+                continue
+
+            sells.append((ticker, qty, f"trim {decision.amount:.0%}"))
+            continue
+
+        if decision.action == "add":
+            if decision.amount is None or not (0.0 < decision.amount <= 0.5):
+                log.warning(
+                    "%s: add needs 0 < amount <= 0.5, got %s — skipping",
+                    ticker,
+                    decision.amount,
+                )
+                continue
+
+            qty = int(held * decision.amount)
+            if qty <= 0:
+                log.warning("%s: add sizes to zero whole shares — skipping", ticker)
+                continue
+
+            buys.append((ticker, qty, f"add {decision.amount:.0%}"))
+
+    submitted = 0
+
+    for ticker, qty, label in sells:
+        order = strategy.create_order(
+            ticker,
+            qty,
+            "sell",
+            order_type="market",
+            time_in_force="day",
+        )
+        strategy.submit_order(order)
+        submitted += 1
+        log.info("%s: market sell %d shares (%s)", ticker, qty, label)
+
+    for ticker, qty, label in buys:
+        order = strategy.create_order(
+            ticker,
+            qty,
+            "buy",
+            order_type="market",
+            time_in_force="day",
+        )
+        strategy.submit_order(order)
+        submitted += 1
+        log.info("%s: market buy %d shares (%s)", ticker, qty, label)
+
+    log.info("drawdown order apply complete: %d submitted", submitted)
+
+    return submitted
