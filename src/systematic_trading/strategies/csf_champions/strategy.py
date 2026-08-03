@@ -49,20 +49,16 @@ class CsfChampions(Strategy):
 
     parameters = {
         "generate_ideas": False,
-        "build_portfolio": True,
+        "build_portfolio": False,
     }
 
     def initialize(self) -> None:
-        # Intraday heartbeat; risk research itself runs once after the close.
+        # Run the strategy heartbeat once per trading day.
         self.sleeptime = "2H"
 
         # The draft book is stateful across the whole strategy run: created
         # empty here, seeded and shaped by build_portfolio, read by submission.
         self.portfolio = Portfolio()
-
-        # Actionable drawdown decisions from the prior after-close review;
-        # applied on the next session's first trading iteration.
-        self.pending_drawdown_orders: list[tuple[DrawdownBreach, DrawdownDecision]] = []
 
         # The flag is the single switch: only run the startup pipeline
         # (idea generation, construction, submission) when explicitly asked.
@@ -98,25 +94,11 @@ class CsfChampions(Strategy):
         """Intraday heartbeat: apply any pending risk orders, nothing else."""
         log.info("CSF Champions trading iteration")
 
-        if not self.pending_drawdown_orders:
-            log.info("No pending drawdown orders to apply")
-            return
-
-        pending = self.pending_drawdown_orders
-        self.pending_drawdown_orders = []
-
-        log.info(
-            "Applying %d pending drawdown order(s) from prior close review",
-            len(pending),
-        )
-        apply_drawdown_orders(self, pending)
-
     def after_market_closes(self) -> None:
         """After close: review new drawdown breaches; stash orders for next open."""
         log.info("After market closes: running drawdown risk review")
 
         orders = manage_drawdowns(self, self.portfolio)
-        self.pending_drawdown_orders = orders
 
         if orders:
             log.info(
