@@ -13,4 +13,4 @@ jobs:
       - name: Ruff check
         uses: astral-sh/ruff-action@v3
         with:
-          args: check src scripts tests
+          args: check src scripts tests --extend-exclude ".*"

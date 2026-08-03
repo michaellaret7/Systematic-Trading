@@ -49,6 +49,9 @@ packages = ["src/systematic_trading"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Skip hidden dirs (.git, .venv, .claude, .ruff_cache, …) on top of Ruff defaults.
+extend-exclude = [".*"]
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
