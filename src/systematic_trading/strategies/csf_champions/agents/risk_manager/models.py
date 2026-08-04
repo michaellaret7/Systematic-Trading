@@ -6,6 +6,10 @@ from pydantic import BaseModel, Field
 
 DrawdownAction = Literal["hold", "trim", "exit", "add"]
 
+# Fraction of current position size that an "add" may size up to.
+# Shared by the agent prompt and apply_drawdown_orders validation.
+MAX_ADD_AMOUNT = 0.75
+
 
 class DrawdownDecision(BaseModel):
     """Risk-manager verdict for one drawdown review."""

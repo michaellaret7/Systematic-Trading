@@ -21,6 +21,7 @@ from systematic_trading.strategies.csf_champions.agents.risk_manager.agent impor
     build_risk_manager,
 )
 from systematic_trading.strategies.csf_champions.agents.risk_manager.models import (
+    MAX_ADD_AMOUNT,
     DrawdownDecision,
 )
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
@@ -378,15 +379,17 @@ def apply_drawdown_orders(
             continue
 
         if decision.action == "add":
-            if decision.amount is None or not (0.0 < decision.amount <= 0.5):
+            if decision.amount is None or not (0.0 < decision.amount <= MAX_ADD_AMOUNT):
                 log.warning(
-                    "%s: add needs 0 < amount <= 0.5, got %s — skipping",
+                    "%s: add needs 0 < amount <= %s, got %s — skipping",
                     ticker,
+                    MAX_ADD_AMOUNT,
                     decision.amount,
                 )
                 continue
 
             qty = int(held * decision.amount)
+            
             if qty <= 0:
                 log.warning("%s: add sizes to zero whole shares — skipping", ticker)
                 continue
