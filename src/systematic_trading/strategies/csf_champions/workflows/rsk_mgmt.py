@@ -6,6 +6,7 @@ round-tripping: a name up 80% that falls 40% off its high is still positive on
 cost and would never alert.
 """
 
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
@@ -21,6 +22,7 @@ from systematic_trading.strategies.csf_champions.agents.risk_manager.agent impor
     build_risk_manager,
 )
 from systematic_trading.strategies.csf_champions.agents.risk_manager.models import (
+    MAX_ADD_AMOUNT,
     DrawdownDecision,
 )
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
@@ -45,6 +47,19 @@ DrawdownBreach = tuple[str, float, float, float, date]
 #     ================================
 # --> Helper funcs
 #     ================================
+
+
+def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
+    """Round a share count to a non-negative whole number.
+
+    Optional ``cap`` clamps the result (e.g. never sell more than held).
+    """
+    qty = max(0, round(raw))
+
+    if cap is not None:
+        qty = min(qty, cap)
+
+    return qty
 
 
 def entry_date(api, symbol: str, position_qty: float) -> date | None:
@@ -211,25 +226,117 @@ def clear_expired_drawdown_reviews(
 
     return stale
 
+def submit_drawdown_orders(
+    strategy: Strategy,
+    orders: list[tuple[DrawdownBreach, DrawdownDecision]],
+) -> tuple[list[tuple[str, int, str]], list[tuple[str, int, str]]]:
+    """Submit market orders for prior-session drawdown decisions.
 
-def record_drawdown_reviews(
-    portfolio: Portfolio,
-    breaches: list[DrawdownBreach],
-) -> None:
-    """Mark tickers as agent-reviewed and start their cooldown window.
-
-    Call this only once the agent has completed for the given breaches. Until
-    then those tickers stay eligible for ``check_for_drawdown_breaches``.
+    Sells (trim / exit) go first so cash is free before any adds. Returns the
+    sized ``(sells, buys)`` lists as ``(ticker, qty, label)`` tuples.
     """
-    for ticker, give_back, _pnl_pct, _avg_entry, as_of in breaches:
-        portfolio.drawdown_reviews[ticker] = (ticker, give_back, as_of)
+    # Create empty lists to store the sell and buy orders 
+    sells: list[tuple[str, int, str]] = []
+    buys: list[tuple[str, int, str]] = []
 
-    if breaches:
-        log.info(
-            "recorded %d drawdown review(s) (cooldown started): %s",
-            len(breaches),
-            ", ".join(ticker for ticker, *_ in breaches),
+    if not orders:
+        log.info("no pending drawdown orders to submit")
+        return sells, buys
+
+    # Resolve whole-share quantities first; skip anything that cannot size cleanly.
+    for _breach, decision in orders:
+        ticker = decision.ticker.strip().upper()
+        position = strategy.get_position(ticker)
+        held = abs(float(position.quantity)) if position is not None else 0.0
+        
+        # Max whole shares we can sell without going short of a fractional remainder.
+        held_whole = math.floor(held)
+
+        # If the position is not open, skip the order
+        if held <= 0 or held_whole <= 0:
+            log.warning("%s: no open position — skipping %s", ticker, decision.action)
+            continue
+
+        # If the decision is to exit, sell the entire whole-share position
+        if decision.action == "exit":
+            qty = held_whole
+            sells.append((ticker, qty, "exit"))
+            continue
+
+        if decision.action == "trim":
+            # The amount is a percentage of the position size so it can't be
+            # less than 0 or greater than 1
+            if decision.amount is None or not (0.0 < decision.amount < 1.0):
+                log.warning(
+                    "%s: trim needs 0 < amount < 1, got %s — skipping",
+                    ticker,
+                    decision.amount,
+                )
+                continue
+
+            # Round allocation to whole shares; never sell more than held.
+            qty = whole_share_qty(held * decision.amount, cap=held_whole)
+
+            if qty <= 0:
+                log.warning("%s: trim sizes to zero whole shares — skipping", ticker)
+                continue
+
+            sells.append((ticker, qty, f"trim {decision.amount:.0%}"))
+            continue
+
+        if decision.action == "add":
+            if decision.amount is None or not (0.0 < decision.amount <= MAX_ADD_AMOUNT):
+                log.warning(
+                    "%s: add needs 0 < amount <= %s, got %s — skipping",
+                    ticker,
+                    MAX_ADD_AMOUNT,
+                    decision.amount,
+                )
+                continue
+
+            # Round allocation to whole shares (same fraction-of-held sizing).
+            qty = whole_share_qty(held * decision.amount)
+
+            if qty <= 0:
+                log.warning("%s: add sizes to zero whole shares — skipping", ticker)
+                continue
+
+            buys.append((ticker, qty, f"add {decision.amount:.0%}"))
+
+    # Loop through the tuple of sells list and submit the orders to the broker
+    for ticker, qty, label in sells:
+        order = strategy.create_order(
+            ticker,
+            qty,
+            "sell",
+            order_type="market",
+            time_in_force="day",
         )
+
+        strategy.submit_order(order)
+
+        log.info("%s: market sell %d shares (%s)", ticker, qty, label)
+
+    for ticker, qty, label in buys:
+        order = strategy.create_order(
+            ticker,
+            qty,
+            "buy",
+            order_type="market",
+            time_in_force="day",
+        )
+
+        strategy.submit_order(order)
+
+        log.info("%s: market buy %d shares (%s)", ticker, qty, label)
+
+    log.info(
+        "drawdown order submit complete: %d sell(s), %d buy(s)",
+        len(sells),
+        len(buys),
+    )
+
+    return sells, buys
 
 
 def _deploy_single_drawdown_agent(
@@ -314,111 +421,33 @@ def manage_drawdowns(
     # 2. run the agent on the freshly drawdown identified tickers
     results = review_drawdowns(breaches)
 
-    # 2a. Once the agent is FINISHED running, add it to the drawdown_reviews dict
-    # add the newly viewed drawdown tickers to the drawdown_reviews dict via the record_drawdown_reviews function
-    completed = [breach for breach, _decision in results]
+    # Create a list of tuples of the breaches and decisions that are trim, exit, or add
     orders = [
-        (breach, decision)
-        for breach, decision in results
-        if decision.action in {"trim", "exit", "add"}
+        (breach, decision) # Expression
+        for breach, decision in results # Loop 
+        if decision.action in {"trim", "exit", "add"} # Condition
     ]
 
-    record_drawdown_reviews(portfolio, completed)
+    # 3. Add the reviews the agent did to the dict in the portfolio class
+    # this is so that if the ticker is in a review window, it wont then be reviewed again the next day
+    for breach, _decision in results:
+        # Unpack the tuple and only keep the ticker, give_back, and as_of date
+        ticker, give_back, _pnl_pct, _avg_entry, as_of = breach
+        portfolio.drawdown_reviews[ticker] = (ticker, give_back, as_of)
 
-    return orders
-
-
-def apply_drawdown_orders(
-    strategy: Strategy,
-    orders: list[tuple[DrawdownBreach, DrawdownDecision]],
-) -> int:
-    """Submit market orders for prior-session drawdown decisions.
-
-    Sells (trim / exit) go first so cash is free before any adds. Returns the
-    number of orders submitted.
-    """
-    if not orders:
-        log.info("no pending drawdown orders to apply")
-        return 0
-
-    # Resolve share quantities first; skip anything that cannot size cleanly.
-    sells: list[tuple[str, int, str]] = []
-    buys: list[tuple[str, int, str]] = []
-
-    for _breach, decision in orders:
-        ticker = decision.ticker.strip().upper()
-        position = strategy.get_position(ticker)
-        held = abs(float(position.quantity)) if position is not None else 0.0
-
-        if held <= 0:
-            log.warning("%s: no open position — skipping %s", ticker, decision.action)
-            continue
-
-        if decision.action == "exit":
-            qty = int(held)
-            if qty > 0:
-                sells.append((ticker, qty, "exit"))
-            continue
-
-        if decision.action == "trim":
-            if decision.amount is None or not (0.0 < decision.amount < 1.0):
-                log.warning(
-                    "%s: trim needs 0 < amount < 1, got %s — skipping",
-                    ticker,
-                    decision.amount,
-                )
-                continue
-
-            qty = int(held * decision.amount)
-            if qty <= 0:
-                log.warning("%s: trim sizes to zero whole shares — skipping", ticker)
-                continue
-
-            sells.append((ticker, qty, f"trim {decision.amount:.0%}"))
-            continue
-
-        if decision.action == "add":
-            if decision.amount is None or not (0.0 < decision.amount <= 0.5):
-                log.warning(
-                    "%s: add needs 0 < amount <= 0.5, got %s — skipping",
-                    ticker,
-                    decision.amount,
-                )
-                continue
-
-            qty = int(held * decision.amount)
-            if qty <= 0:
-                log.warning("%s: add sizes to zero whole shares — skipping", ticker)
-                continue
-
-            buys.append((ticker, qty, f"add {decision.amount:.0%}"))
-
-    submitted = 0
-
-    for ticker, qty, label in sells:
-        order = strategy.create_order(
-            ticker,
-            qty,
-            "sell",
-            order_type="market",
-            time_in_force="day",
+    if results:
+        log.info(
+            "recorded %d drawdown review(s) (cooldown started): %s",
+            len(results),
+            ", ".join(breach[0] for breach, _ in results),
         )
-        strategy.submit_order(order)
-        submitted += 1
-        log.info("%s: market sell %d shares (%s)", ticker, qty, label)
+    
+    # TODO: inject the cptl reallocator agent here to reallocate the portfolio based on the risk manager's decisions
+    # This will take the orders and then determine what it wants to do with the capital freed up from the sells 
+    # It will then add on orders to the orders list and then all of them will be submitted to the broker
+    # via the submit_drawdown_orders function
 
-    for ticker, qty, label in buys:
-        order = strategy.create_order(
-            ticker,
-            qty,
-            "buy",
-            order_type="market",
-            time_in_force="day",
-        )
-        strategy.submit_order(order)
-        submitted += 1
-        log.info("%s: market buy %d shares (%s)", ticker, qty, label)
+    # Submit the orders to the broker
+    sells, buys = submit_drawdown_orders(strategy, orders)
 
-    log.info("drawdown order apply complete: %d submitted", submitted)
-
-    return submitted
+    return sells, buys

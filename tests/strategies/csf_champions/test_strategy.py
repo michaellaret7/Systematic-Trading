@@ -65,8 +65,8 @@ def test_on_trading_iteration_applies_and_clears_pending(monkeypatch) -> None:
     applied: list = []
     monkeypatch.setattr(
         strategy_module,
-        "apply_drawdown_orders",
-        lambda strategy, orders: applied.append(list(orders)) or 1,
+        "submit_drawdown_orders",
+        lambda strategy, orders: applied.append(list(orders)) or ([], []),
     )
 
     CsfChampions.on_trading_iteration(context)
@@ -82,8 +82,8 @@ def test_on_trading_iteration_noop_without_pending(monkeypatch) -> None:
     context = LifecycleContext()
     monkeypatch.setattr(
         strategy_module,
-        "apply_drawdown_orders",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not apply")),
+        "submit_drawdown_orders",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not submit")),
     )
 
     CsfChampions.on_trading_iteration(context)

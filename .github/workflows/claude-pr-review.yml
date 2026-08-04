@@ -31,6 +31,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Prefetch base ref
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: git fetch --no-tags origin "$PR_BASE_REF"
+
       - name: Review pull request with Claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -43,12 +48,24 @@ jobs:
             PULL REQUEST: ${{ github.event.pull_request.number }}
             BASE BRANCH: ${{ github.event.pull_request.base.ref }}
             HEAD BRANCH: ${{ github.event.pull_request.head.ref }}
+            BASE SHA: ${{ github.event.pull_request.base.sha }}
+            HEAD SHA: ${{ github.event.pull_request.head.sha }}
 
             Review the changes introduced by this pull request.
 
-            Read `.claude/CLAUDE.md` first. It defines this repository's
-            architecture and development guidelines, and it is the standard
-            you are reviewing against.
+            ## Method
+
+            1. Read `.claude/CLAUDE.md` first. It defines this repository's
+               architecture and development guidelines, and it is the standard
+               you are reviewing against.
+            2. Inspect the full PR diff:
+               `git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}`
+               and/or `gh pr diff ${{ github.event.pull_request.number }}`.
+            3. For every meaningful changed symbol, use Read / Grep / Glob to
+               inspect surrounding code and search the repo for existing
+               helpers before claiming something is new or missing.
+            4. Post findings as inline comments on the affected lines when
+               possible. Finish with one concise top-level PR comment.
 
             ## Primary focus: design and simplicity
 
@@ -101,13 +118,15 @@ jobs:
             with three real simplifications is better than a long one padded
             with observations.
 
-            Add inline comments on the affected lines when possible.
-            Finish with a concise top-level summary that states whether the
-            change is as simple as it could be.
+            Add inline comments on the affected lines when possible (pass
+            `confirmed: true` to the inline-comment tool). Finish with a
+            concise top-level summary that states whether the change is as
+            simple as it could be.
 
             If there are no significant findings, explicitly say:
             "No blocking issues found."
 
           claude_args: |
             --model claude-opus-5
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git grep:*)"
