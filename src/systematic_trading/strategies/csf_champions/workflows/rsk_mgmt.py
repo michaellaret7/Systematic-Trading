@@ -428,9 +428,10 @@ def manage_drawdowns(
         if decision.action in {"trim", "exit", "add"} # Condition
     ]
 
-    # 3. Record successful reviews into the 2-week cooldown window.
-    # Only successes from review_drawdowns land here; failures stay eligible.
+    # 3. Add the reviews the agent did to the dict in the portfolio class
+    # this is so that if the ticker is in a review window, it wont then be reviewed again the next day
     for breach, _decision in results:
+        # Unpack the tuple and only keep the ticker, give_back, and as_of date
         ticker, give_back, _pnl_pct, _avg_entry, as_of = breach
         portfolio.drawdown_reviews[ticker] = (ticker, give_back, as_of)
 
@@ -440,5 +441,13 @@ def manage_drawdowns(
             len(results),
             ", ".join(breach[0] for breach, _ in results),
         )
+    
+    # TODO: inject the cptl reallocator agent here to reallocate the portfolio based on the risk manager's decisions
+    # This will take the orders and then determine what it wants to do with the capital freed up from the sells 
+    # It will then add on orders to the orders list and then all of them will be submitted to the broker
+    # via the submit_drawdown_orders function
 
-    return orders
+    # Submit the orders to the broker
+    sells, buys = submit_drawdown_orders(strategy, orders)
+
+    return sells, buys
