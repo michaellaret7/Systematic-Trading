@@ -30,13 +30,9 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
     generate_trade_ideas,
 )
 from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import (
-    DrawdownBreach,
-    apply_drawdown_orders,
     clear_expired_drawdown_reviews,
     manage_drawdowns,
-)
-from systematic_trading.strategies.csf_champions.agents.risk_manager.models import (
-    DrawdownDecision,
+    submit_drawdown_orders,
 )
 
 log = get_logger(__name__)

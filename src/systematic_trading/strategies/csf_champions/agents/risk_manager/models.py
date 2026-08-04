@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 DrawdownAction = Literal["hold", "trim", "exit", "add"]
 
 # Fraction of current position size that an "add" may size up to.
-# Shared by the agent prompt and apply_drawdown_orders validation.
+# Shared by the agent prompt and submit_drawdown_orders validation.
 MAX_ADD_AMOUNT = 0.75
 
 
