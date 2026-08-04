@@ -31,10 +31,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prefetch base ref
+      - name: Prefetch base and head SHAs
         env:
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: git fetch --no-tags origin "$PR_BASE_REF"
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git fetch --no-tags origin "$PR_BASE_SHA" "$PR_HEAD_SHA"
 
       - name: Review pull request with Claude
         uses: anthropics/claude-code-action@v1

@@ -226,29 +226,25 @@ def clear_expired_drawdown_reviews(
 
     return stale
 
-def submit_drawdown_orders(
+def size_drawdown_orders(
     strategy: Strategy,
     orders: list[tuple[DrawdownBreach, DrawdownDecision]],
 ) -> tuple[list[tuple[str, int, str]], list[tuple[str, int, str]]]:
-    """Submit market orders for prior-session drawdown decisions.
+    """Size trim/exit/add decisions into whole-share sell and buy lists.
 
-    Sells (trim / exit) go first so cash is free before any adds. Returns the
-    sized ``(sells, buys)`` lists as ``(ticker, qty, label)`` tuples.
+    Returns ``(sells, buys)`` as ``(ticker, qty, label)`` tuples. Does not submit.
     """
-    # Create empty lists to store the sell and buy orders 
     sells: list[tuple[str, int, str]] = []
     buys: list[tuple[str, int, str]] = []
 
     if not orders:
-        log.info("no pending drawdown orders to submit")
         return sells, buys
 
-    # Resolve whole-share quantities first; skip anything that cannot size cleanly.
     for _breach, decision in orders:
         ticker = decision.ticker.strip().upper()
         position = strategy.get_position(ticker)
         held = abs(float(position.quantity)) if position is not None else 0.0
-        
+
         # Max whole shares we can sell without going short of a fractional remainder.
         held_whole = math.floor(held)
 
@@ -259,8 +255,7 @@ def submit_drawdown_orders(
 
         # If the decision is to exit, sell the entire whole-share position
         if decision.action == "exit":
-            qty = held_whole
-            sells.append((ticker, qty, "exit"))
+            sells.append((ticker, held_whole, "exit"))
             continue
 
         if decision.action == "trim":
@@ -303,7 +298,62 @@ def submit_drawdown_orders(
 
             buys.append((ticker, qty, f"add {decision.amount:.0%}"))
 
-    # Loop through the tuple of sells list and submit the orders to the broker
+    return sells, buys
+
+
+def estimate_freed_capital(
+    strategy: Strategy,
+    sells: list[tuple[str, int, str]],
+) -> float:
+    """Estimate cash raised by sized sell orders at last price.
+
+    Sum of ``qty * last_price`` across trim/exit rows. Skips names with no
+    usable price. Returns dollars, rounded to cents.
+    """
+    total = 0.0
+
+    for ticker, qty, _label in sells:
+        if qty <= 0:
+            continue
+
+        last_price = strategy.get_last_price(ticker)
+
+        if last_price is None:
+            log.warning("%s: no last price — excluding from freed capital", ticker)
+            continue
+
+        price = float(last_price)
+
+        if not math.isfinite(price) or price <= 0:
+            log.warning("%s: invalid last price %s — excluding from freed capital", ticker, last_price)
+            continue
+
+        total += qty * price
+
+    freed = round(total, 2)
+
+    log.info(
+        "estimated capital freed by %d sell(s): $%.2f",
+        len(sells),
+        freed,
+    )
+
+    return freed
+
+
+def submit_drawdown_orders(
+    strategy: Strategy,
+    sells: list[tuple[str, int, str]],
+    buys: list[tuple[str, int, str]],
+) -> None:
+    """Submit pre-sized market sell then buy orders.
+
+    Sells go first so cash is free before any adds.
+    """
+    if not sells and not buys:
+        log.info("no pending drawdown orders to submit")
+        return
+
     for ticker, qty, label in sells:
         order = strategy.create_order(
             ticker,
@@ -312,9 +362,7 @@ def submit_drawdown_orders(
             order_type="market",
             time_in_force="day",
         )
-
         strategy.submit_order(order)
-
         log.info("%s: market sell %d shares (%s)", ticker, qty, label)
 
     for ticker, qty, label in buys:
@@ -325,9 +373,7 @@ def submit_drawdown_orders(
             order_type="market",
             time_in_force="day",
         )
-
         strategy.submit_order(order)
-
         log.info("%s: market buy %d shares (%s)", ticker, qty, label)
 
     log.info(
@@ -335,8 +381,6 @@ def submit_drawdown_orders(
         len(sells),
         len(buys),
     )
-
-    return sells, buys
 
 
 def _deploy_single_drawdown_agent(
@@ -441,13 +485,17 @@ def manage_drawdowns(
             len(results),
             ", ".join(breach[0] for breach, _ in results),
         )
-    
+
+    # 4. Size actionable decisions and estimate cash raised by sells.
+    sells, buys = size_drawdown_orders(strategy, orders)
+    freed = estimate_freed_capital(strategy, sells)
+
     # TODO: inject the cptl reallocator agent here to reallocate the portfolio based on the risk manager's decisions
-    # This will take the orders and then determine what it wants to do with the capital freed up from the sells 
-    # It will then add on orders to the orders list and then all of them will be submitted to the broker
-    # via the submit_drawdown_orders function
+    # This will take the orders and then determine what it wants to do with the capital freed up from the sells
+    # (`freed`) and may append buys. Then all sized orders go through submit_drawdown_orders.
+    log.info("capital available for reallocation: $%.2f", freed)
 
-    # Submit the orders to the broker
-    sells, buys = submit_drawdown_orders(strategy, orders)
+    # 5. Submit the sized orders to the broker (sells before buys). dont do this yet
+    # submit_drawdown_orders(strategy, sells, buys)
 
-    return sells, buys
+    return orders
