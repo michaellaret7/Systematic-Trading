@@ -410,8 +410,57 @@ def test_review_drawdowns_empty_input_short_circuits(
 
 
 #     ================================
+# --> estimate_freed_capital
+#     ================================
+
+
+def test_estimate_freed_capital_sums_sells_at_last_price() -> None:
+    """Freed cash is qty * last price across sized sells."""
+    strategy = SimpleNamespace(
+        get_last_price=lambda ticker: {"AAPL": 100.0, "MSFT": 50.5}[ticker],
+    )
+    sells = [
+        ("AAPL", 10, "exit"),
+        ("MSFT", 4, "trim 50%"),
+    ]
+
+    freed = risk.estimate_freed_capital(strategy, sells)
+
+    assert freed == 1202.0
+
+
+def test_estimate_freed_capital_skips_missing_or_invalid_prices() -> None:
+    """Names without a usable last price are excluded from the total."""
+    prices = {"AAPL": 100.0, "BAD": 0.0, "NONE": None}
+    strategy = SimpleNamespace(get_last_price=lambda ticker: prices[ticker])
+    sells = [
+        ("AAPL", 5, "exit"),
+        ("BAD", 3, "exit"),
+        ("NONE", 2, "exit"),
+    ]
+
+    freed = risk.estimate_freed_capital(strategy, sells)
+
+    assert freed == 500.0
+
+
+def test_estimate_freed_capital_empty_sells() -> None:
+    """No sells means zero freed capital."""
+    strategy = SimpleNamespace(get_last_price=lambda _t: 100.0)
+
+    assert risk.estimate_freed_capital(strategy, []) == 0.0
+
+
+#     ================================
 # --> manage_drawdowns (orchestration)
 #     ================================
+
+
+def _stub_sizing_and_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip broker sizing/submit in orchestration tests."""
+    monkeypatch.setattr(risk, "size_drawdown_orders", lambda _s, _o: ([], []))
+    monkeypatch.setattr(risk, "estimate_freed_capital", lambda _s, _sells: 0.0)
+    monkeypatch.setattr(risk, "submit_drawdown_orders", lambda _s, _sells, _buys: None)
 
 
 def test_manage_drawdowns_returns_actionable_orders_and_records_successes(
@@ -437,6 +486,7 @@ def test_manage_drawdowns_returns_actionable_orders_and_records_successes(
     )
     monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
     monkeypatch.setattr(risk, "MAX_WORKERS", 1)
+    _stub_sizing_and_submit(monkeypatch)
 
     orders = risk.manage_drawdowns(strategy, portfolio)
 
@@ -483,6 +533,7 @@ def test_manage_drawdowns_does_not_record_failed_reviews(
     agent = FakeAgent(action="exit", fail_tickers={"BAD"})
     monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
     monkeypatch.setattr(risk, "MAX_WORKERS", 1)
+    _stub_sizing_and_submit(monkeypatch)
 
     orders = risk.manage_drawdowns(strategy, portfolio)
 
