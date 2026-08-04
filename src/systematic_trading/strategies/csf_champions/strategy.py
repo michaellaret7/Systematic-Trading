@@ -49,7 +49,7 @@ class CsfChampions(Strategy):
     }
 
     def initialize(self) -> None:
-        # Run the strategy heartbeat once per trading day.
+        # Run the strategy heartbeat every 2 hours during the trading day
         self.sleeptime = "2H"
 
         # The draft book is stateful across the whole strategy run: created
@@ -75,6 +75,7 @@ class CsfChampions(Strategy):
 
     def before_market_opens(self) -> None:
         """Drop agent-reviewed drawdowns whose two-week cooldown has expired."""
+
         evicted = clear_expired_drawdown_reviews(self, self.portfolio)
 
         if evicted:
@@ -88,10 +89,12 @@ class CsfChampions(Strategy):
 
     def on_trading_iteration(self) -> None:
         """Intraday heartbeat: apply any pending risk orders, nothing else."""
+
         log.info("CSF Champions trading iteration")
 
     def after_market_closes(self) -> None:
         """After close: review new drawdown breaches; stash orders for next open."""
+
         log.info("After market closes: running drawdown risk review")
 
         orders = manage_drawdowns(self, self.portfolio)

@@ -338,24 +338,6 @@ def submit_drawdown_orders(
 
     return sells, buys
 
-def record_drawdown_reviews(
-    portfolio: Portfolio,
-    breaches: list[DrawdownBreach],
-) -> None:
-    """Mark tickers as agent-reviewed and start their cooldown window.
-
-    Call this only once the agent has completed for the given breaches. Until
-    then those tickers stay eligible for ``check_for_drawdown_breaches``.
-    """
-    for ticker, give_back, _pnl_pct, _avg_entry, as_of in breaches:
-        portfolio.drawdown_reviews[ticker] = (ticker, give_back, as_of)
-
-    if breaches:
-        log.info(
-            "recorded %d drawdown review(s) (cooldown started): %s",
-            len(breaches),
-            ", ".join(ticker for ticker, *_ in breaches),
-        )
 
 def _deploy_single_drawdown_agent(
     breach: DrawdownBreach,
@@ -439,15 +421,24 @@ def manage_drawdowns(
     # 2. run the agent on the freshly drawdown identified tickers
     results = review_drawdowns(breaches)
 
-    # 2a. Once the agent is FINISHED running, add it to the drawdown_reviews dict
-    # add the newly viewed drawdown tickers to the drawdown_reviews dict via the record_drawdown_reviews function
-    completed = [breach for breach, _decision in results]
-
     # Create a list of tuples of the breaches and decisions that are trim, exit, or add
-    orders = [(breach, decision) for breach, decision in results if decision.action in {"trim", "exit", "add"}]
+    orders = [
+        (breach, decision) # Expression
+        for breach, decision in results # Loop 
+        if decision.action in {"trim", "exit", "add"} # Condition
+    ]
 
-    # 3. Record the drawdown reviews. If we reviewed a ticker, add it to the drawdown_reviews dict
-    # for the 2 week cooldown window 
-    record_drawdown_reviews(portfolio, completed)
+    # 3. Record successful reviews into the 2-week cooldown window.
+    # Only successes from review_drawdowns land here; failures stay eligible.
+    for breach, _decision in results:
+        ticker, give_back, _pnl_pct, _avg_entry, as_of = breach
+        portfolio.drawdown_reviews[ticker] = (ticker, give_back, as_of)
+
+    if results:
+        log.info(
+            "recorded %d drawdown review(s) (cooldown started): %s",
+            len(results),
+            ", ".join(breach[0] for breach, _ in results),
+        )
 
     return orders

@@ -355,36 +355,6 @@ def test_clear_expired_drawdown_reviews_noop_when_all_fresh() -> None:
 
 
 #     ================================
-# --> record_drawdown_reviews
-#     ================================
-
-
-def test_record_drawdown_reviews_starts_cooldown() -> None:
-    """Successful reviews are written into portfolio.drawdown_reviews."""
-    portfolio = Portfolio()
-    breaches = [
-        _breach("AAPL", -30.0, -30.0, 100.0, date(2026, 7, 30)),
-        _breach("MSFT", -35.0, -35.0, 200.0, date(2026, 7, 30)),
-    ]
-
-    risk.record_drawdown_reviews(portfolio, breaches)
-
-    assert portfolio.drawdown_reviews == {
-        "AAPL": ("AAPL", -30.0, date(2026, 7, 30)),
-        "MSFT": ("MSFT", -35.0, date(2026, 7, 30)),
-    }
-
-
-def test_record_drawdown_reviews_noop_on_empty() -> None:
-    """Empty breach list leaves the cooldown dict untouched."""
-    portfolio = Portfolio()
-
-    risk.record_drawdown_reviews(portfolio, [])
-
-    assert portfolio.drawdown_reviews == {}
-
-
-#     ================================
 # --> review_drawdowns
 #     ================================
 
