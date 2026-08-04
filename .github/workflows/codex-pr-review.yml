@@ -40,7 +40,7 @@ jobs:
           prompt: |
             Run `git diff dev...HEAD` and review the changes.
 
-            Read `.claude/CLAUDE.md` first. It defines this repository's
+            Read `AGENTS.md` first. It defines this repository's
             architecture and development guidelines, and it is the standard
             you are reviewing against.
 

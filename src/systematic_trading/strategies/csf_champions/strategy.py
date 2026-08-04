@@ -5,6 +5,13 @@ generate trade ideas (only when ``generate_ideas`` is True), build the draft
 portfolio via the portfolio-constructor agent, then submit the book as
 whole-share market buys on Alpaca.
 
+Daily risk loop:
+- ``before_market_opens`` — drop expired drawdown cooldowns
+- ``on_trading_iteration`` — submit any pending risk orders from the prior
+  after-close review (sells before buys)
+- ``after_market_closes`` — run the drawdown agent and stash actionable orders
+  for the next session
+
 Broker state (positions, fills, cash) is read from Alpaca. DynamoDB is used
 only for the trade-ideas queue.
 """
@@ -23,8 +30,13 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
     generate_trade_ideas,
 )
 from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import (
+    DrawdownBreach,
+    apply_drawdown_orders,
     clear_expired_drawdown_reviews,
     manage_drawdowns,
+)
+from systematic_trading.strategies.csf_champions.agents.risk_manager.models import (
+    DrawdownDecision,
 )
 
 log = get_logger(__name__)
@@ -37,7 +49,7 @@ class CsfChampions(Strategy):
 
     parameters = {
         "generate_ideas": False,
-        "build_portfolio": True,
+        "build_portfolio": False,
     }
 
     def initialize(self) -> None:
@@ -67,19 +79,32 @@ class CsfChampions(Strategy):
 
     def before_market_opens(self) -> None:
         """Drop agent-reviewed drawdowns whose two-week cooldown has expired."""
-        # Drop all tickers that are expired out of the 2 week review window
-        # if they are still in a drawdown, they will be reviewed again
-        # clear_expired_drawdown_reviews(self, self.portfolio)
-        log.info("Before market opens: No expired drawdown reviews to clear")
+        evicted = clear_expired_drawdown_reviews(self, self.portfolio)
+
+        if evicted:
+            log.info(
+                "Before market opens: evicted %d expired drawdown review(s): %s",
+                len(evicted),
+                ", ".join(sorted(evicted)),
+            )
+        else:
+            log.info("Before market opens: no expired drawdown reviews to evict")
 
     def on_trading_iteration(self) -> None:
-        """Daily strategy heartbeat."""
-        log.info("CSF Champions daily trading iteration")
-
-        # check → review breaches → record only successful agent finishes
-        # (no-ops while names are locked in drawdown_reviews)
-        # manage_drawdowns(self, self.portfolio)
+        """Intraday heartbeat: apply any pending risk orders, nothing else."""
+        log.info("CSF Champions trading iteration")
 
     def after_market_closes(self) -> None:
-        """After market closes: check for new drawdown breaches and review them."""
-        # If there are any open orders thaty expired, re enter them to be filled the next trading day
+        """After close: review new drawdown breaches; stash orders for next open."""
+        log.info("After market closes: running drawdown risk review")
+
+        orders = manage_drawdowns(self, self.portfolio)
+
+        if orders:
+            log.info(
+                "After market closes: %d actionable drawdown order(s) queued for next session: %s",
+                len(orders),
+                ", ".join(f"{decision.ticker}:{decision.action}" for _breach, decision in orders),
+            )
+        else:
+            log.info("After market closes: no actionable drawdown orders")

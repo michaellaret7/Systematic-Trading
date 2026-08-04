@@ -13,7 +13,7 @@ from agent_harness.agent import Agent
 from agent_harness.decorator import bind_tool
 
 from systematic_trading.agents.shared_tools.fundamentals import get_fundamental_statement
-from systematic_trading.agents.shared_tools.prices import get_recent_prices
+from systematic_trading.agents.shared_tools.prices import get_prices
 from systematic_trading.agents.shared_tools.trade_ideas import submit_trade_idea
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.prompt import SYSTEM
 from systematic_trading.strategies.csf_champions.agents.ticker_analyst.subagents.management import (
@@ -43,7 +43,7 @@ def build_ticker_analyst() -> Agent:
         system=SYSTEM,
         tools=[
             get_fundamental_statement,
-            get_recent_prices,
+            get_prices,
             # strategy/model are stamped onto every submitted idea; hidden from the LLM schema.
             bind_tool(submit_trade_idea, _strategy=STRATEGY, _model=MODEL),
         ],

@@ -134,7 +134,7 @@ Same taxonomy across all trees, so a level means one thing regardless of source.
 
 | Level | Meaning | `systematic_trading` | `agent` |
 |---|---|---|---|
-| `INFO` | Narrative. | `Open-order sweep: 3 open, 1 healed, 2 re-submitted` | `tool.end GetRecentPrices 1.8s` |
+| `INFO` | Narrative. | `Open-order sweep: 3 open, 1 healed, 2 re-submitted` | `tool.end GetPrices 1.8s` |
 | `WARNING` | Degraded, continuing. | `MSFT: buys zero whole shares — skipping` | `tool.end SubmitTradeIdea denied` |
 | `ERROR` | A unit of work failed. | `[12/47] LVS failed: RateLimitError` | `tool.end GetFundamentals error: 404` |
 | `CRITICAL` | Nothing special today. Lumibot's emergency shutdown fires only when `LOG_ERRORS_TO_CSV` is set, which it is not. | — | — |

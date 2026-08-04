@@ -1,18 +1,23 @@
-"""Agent tool: submit a trade idea to the DynamoDB trade-ideas repository.
+"""Agent tools: submit and pull trade ideas against the DynamoDB repository.
 
-The LLM supplies only the idea itself (ticker, side, allocation, thesis).
-Everything it shouldn't control is stamped by the tool: strategy and model
-are injected at wiring time via ``bind_tool`` (hidden underscore params), the
-reference price comes from the daily prices repository, and the submission
-timestamp is the wall clock — ideas are a live-agent flow, never a backtest.
+Submit: the LLM supplies only the idea itself (ticker, side, allocation,
+thesis). Everything it shouldn't control is stamped by the tool — strategy
+and model are injected at wiring time via ``bind_tool`` (hidden underscore
+params), the reference price comes from the daily prices repository, and the
+submission timestamp is the wall clock. Ideas are a live-agent flow, never a
+backtest.
+
+Pull: the LLM supplies a ticker; the tool loads the latest idea for that
+ticker under the bound strategy. Strategy is injected the same way as submit.
 """
 
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
+import yaml
 from agent_harness.decorator import Param, agent_tool
 
-from systematic_trading.data.repository import load_daily_prices, submit_idea
+from systematic_trading.data.repository import load_daily_prices, load_ideas, submit_idea
 from systematic_trading.domain.ideas import TradeIdea
 
 #     ================================
@@ -30,8 +35,24 @@ def _latest_close(symbol: str) -> float | None:
     return float(frame.sort_values("date")["close"].iloc[-1])
 
 
+def _idea_payload(row: dict[str, Any]) -> dict[str, Any]:
+    """Plain-python mapping of one DynamoDB idea row for YAML serialization."""
+    return {
+        "idea_id": row["idea_id"],
+        "ticker": row["ticker"],
+        "side": row["side"],
+        "score": float(row["score"]),
+        "allocation_pct": float(row["allocation_pct"]),
+        "thesis": row["thesis"],
+        "reference_price": float(row["reference_price"]),
+        "model": row["model"],
+        "created_at": row["created_at"],
+        "status": row["status"],
+    }
+
+
 #     ================================
-# --> Tool
+# --> Tools
 #     ================================
 
 
@@ -110,3 +131,34 @@ def submit_trade_idea(
         f"recorded trade idea {idea_id}: {side} {symbol} at {allocation_pct}% of portfolio "
         f"(reference price ${reference_price:,.2f}, status: pending)"
     )
+
+
+@agent_tool(name="PullTradeIdea", safe_parallel=True)
+def pull_trade_idea(
+    ticker: Annotated[str, Param(description="Ticker symbol, e.g. 'AAPL'.")],
+    _strategy: str,
+) -> str:
+    """
+    Pull the latest trade idea for one ticker from the strategy's trade-ideas
+    queue. Returns the recorded idea (side, score, allocation, thesis,
+    reference price, status, model, timestamps) as YAML.
+
+    When multiple ideas exist for the same ticker, the most recent submission
+    wins (idea ids are timestamp-prefixed). An unknown ticker with no idea
+    returns an "error: ..." string.
+    """
+    symbol = ticker.strip().upper()
+    frame = load_ideas(_strategy)
+
+    if frame.empty:
+        return f"error: no trade ideas for strategy {_strategy!r}"
+
+    matches = frame[frame["ticker"] == symbol]
+
+    if matches.empty:
+        return f"error: no trade idea for ticker {symbol!r}"
+
+    # idea_id is timestamp-prefixed, so lexicographic max is the latest submission.
+    latest = matches.sort_values("idea_id").iloc[-1].to_dict()
+
+    return yaml.safe_dump(_idea_payload(latest), sort_keys=False, default_flow_style=False)
