@@ -9,7 +9,7 @@ Daily risk loop:
 - ``before_market_opens`` — drop expired drawdown cooldowns
 - ``after_market_closes`` — run the drawdown agent, size, and stash sells/buys
 - ``flush_pending_drawdown_orders`` (10:00 weekday cron) — submit pending
-  market orders (sells before buys), then clear the stash on success
+  market orders (sells before buys); the book drains itself as it goes
 
 Broker state (positions, fills, cash) is read from Alpaca. DynamoDB is used
 only for the trade-ideas queue.
@@ -29,8 +29,8 @@ from systematic_trading.strategies.csf_champions.workflows.generate_trade_ideas 
     generate_trade_ideas,
 )
 from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import (
+    SizedOrder,
     clear_expired_drawdown_reviews,
-    empty_order_book,
     manage_drawdowns,
     submit_drawdown_orders,
 )
@@ -62,10 +62,14 @@ class CsfChampions(Strategy):
         self.portfolio = Portfolio()
 
         # Overnight risk order stash for the 10:00 flush.
-        # Shape: {"sells": [(ticker, qty, label), ...], "buys": [...]}
-        self.pending_drawdown_orders = empty_order_book()
+        self.pending_sells: list[SizedOrder] = []
+        self.pending_buys: list[SizedOrder] = []
 
         # 10:00 Mon–Fri: pass the method reference — do not call it here.
+        # Lumibot builds the trigger with `timezone=self.pytz`, which is the
+        # data source's tz (America/New_York by default), so this is 10:00 ET
+        # regardless of the droplet clock. It also skips registration entirely
+        # when backtesting — `on_trading_iteration` covers that case.
         self.register_cron_callback("0 10 * * 1-5", self.flush_pending_drawdown_orders)
 
         # Optional one-shot build: ideas → construct → enter. Off by default.
@@ -103,33 +107,36 @@ class CsfChampions(Strategy):
             log.info("Before market opens: no expired drawdown reviews to evict")
 
     def on_trading_iteration(self) -> None:
-        """Intraday heartbeat only. Risk order submit is the 10:00 cron."""
+        """Intraday heartbeat. In backtest it also stands in for the 10:00 cron.
+
+        Lumibot skips cron registration when backtesting, so the flush would
+        never fire there and the risk loop would be unreachable from a
+        backtest. Live, submission stays on the cron alone.
+        """
 
         log.info("CSF Champions trading iteration")
+
+        if self.is_backtesting and (self.pending_sells or self.pending_buys):
+            self.flush_pending_drawdown_orders()
 
     def after_market_closes(self) -> None:
         """Run drawdown review; append any new sized sells/buys into the pending book."""
 
         log.info("After market closes: running drawdown risk review")
 
-        # None = nothing new to queue (no breaches, holds only, or zero-sized).
+        # Empty = nothing new to queue (no breaches, holds only, or zero-sized).
         # Existing pending rows (e.g. unflushed after a closed 10:00) stay put.
-        sized_drawdown_orders = manage_drawdowns(self, self.portfolio)
+        sells, buys = manage_drawdowns(self, self.portfolio)
 
-        if sized_drawdown_orders is None:
-            log.info("After market closes: no new drawdown orders (pending book unchanged)")
-            return
-
-        sells, buys = sized_drawdown_orders
-        self.pending_drawdown_orders["sells"] += sells
-        self.pending_drawdown_orders["buys"] += buys
+        self.pending_sells += sells
+        self.pending_buys += buys
 
         log.info(
             "After market closes: appended %d sell(s), %d buy(s) (book now %d sell(s), %d buy(s)) for 10:00",
             len(sells),
             len(buys),
-            len(self.pending_drawdown_orders["sells"]),
-            len(self.pending_drawdown_orders["buys"]),
+            len(self.pending_sells),
+            len(self.pending_buys),
         )
 
     #     ================================
@@ -143,18 +150,12 @@ class CsfChampions(Strategy):
         clear here — whatever survives was never sent and is retried next flush.
         """
 
-        book = self.pending_drawdown_orders
-
-        if not book["sells"] and not book["buys"]:
+        if not self.pending_sells and not self.pending_buys:
             log.info("10:00 flush: no pending drawdown orders")
             return
 
         # False when market is closed — leave the stash for a later day.
-        if submit_drawdown_orders(self, book):
-            log.info(
-                "10:00 flush: submitted; %d sell(s), %d buy(s) still pending",
-                len(book["sells"]),
-                len(book["buys"]),
-            )
+        if submit_drawdown_orders(self, self.portfolio, self.pending_sells, self.pending_buys):
+            log.info("10:00 flush: pending drawdown book flushed")
         else:
             log.info("10:00 flush: market closed — pending drawdown orders kept")

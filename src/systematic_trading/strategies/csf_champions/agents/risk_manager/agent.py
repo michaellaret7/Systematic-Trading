@@ -41,5 +41,3 @@ def build_risk_manager() -> Agent:
         ],
         output_model=DrawdownDecision,
     )
-
-

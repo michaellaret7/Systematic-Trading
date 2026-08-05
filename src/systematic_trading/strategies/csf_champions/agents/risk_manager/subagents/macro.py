@@ -108,4 +108,3 @@ MACRO_SUBAGENT_CONFIG = SubAgentConfig(
     provider="openrouter",
     model="z-ai/glm-5.2",
 )
-

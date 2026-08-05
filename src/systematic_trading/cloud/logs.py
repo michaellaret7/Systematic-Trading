@@ -299,9 +299,7 @@ def tail_cloudwatch_log(
     ``log_group_arn`` overrides the STS-derived ARN.
     """
     if history:
-        yield from recent_cloudwatch_log(
-            history, group, level=level, stream_prefix=stream_prefix
-        )
+        yield from recent_cloudwatch_log(history, group, level=level, stream_prefix=stream_prefix)
 
     client = boto3.client("logs", region_name=aws_region())
 

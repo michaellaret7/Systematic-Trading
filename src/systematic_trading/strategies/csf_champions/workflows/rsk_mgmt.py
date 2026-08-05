@@ -46,14 +46,6 @@ DrawdownBreach = tuple[str, float, float, float, date]
 # Sized order row: (ticker, whole-share qty, label).
 SizedOrder = tuple[str, int, str]
 
-# Pending risk book stashed on the strategy between AMC and the 10:00 cron.
-OrderBook = dict[str, list[SizedOrder]]
-
-
-def empty_order_book() -> OrderBook:
-    """Return an empty sell/buy pending order book."""
-    return {"sells": [], "buys": []}
-
 
 #     ================================
 # --> Helpers
@@ -63,21 +55,26 @@ def empty_order_book() -> OrderBook:
 def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
     """Round a share count to a non-negative whole number.
 
-    Optional ``cap`` clamps the result (e.g. never sell more than held).
+    Optional ``cap`` clamps the result (e.g. never sell more than held); a
+    negative cap floors to zero rather than flipping the sign.
     """
     qty = max(0, round(raw))
 
     if cap is not None:
-        qty = min(qty, cap)
+        qty = max(0, min(qty, cap))
 
     return qty
 
 
-def held_shares(strategy: Strategy, ticker: str) -> float:
-    """Shares currently held in ``ticker``, unsigned. Returns 0.0 when flat."""
+def signed_shares(strategy: Strategy, ticker: str) -> float:
+    """Shares currently held in ``ticker``, signed. Returns 0.0 when flat.
+
+    Signed rather than absolute so a short position reads as negative and the
+    sell caps built on it block instead of permit.
+    """
     position = strategy.get_position(ticker)
 
-    return abs(float(position.quantity)) if position is not None else 0.0
+    return float(position.quantity) if position is not None else 0.0
 
 
 def entry_date(api, symbol: str, position_qty: float) -> date | None:
@@ -256,6 +253,29 @@ def clear_expired_drawdown_reviews(
     return stale
 
 
+def release_drawdown_cooldowns(portfolio: Portfolio, tickers: list[str]) -> list[str]:
+    """Drop the review cooldown for tickers whose orders never reached the broker.
+
+    A dropped submission means the agent's decision was never acted on, so the
+    name must not sit unmanaged for the rest of the window. Return the tickers
+    actually released.
+    """
+    released: list[str] = []
+
+    for ticker in dict.fromkeys(tickers):
+        if portfolio.drawdown_reviews.pop(ticker, None) is not None:
+            released.append(ticker)
+
+    if released:
+        log.warning(
+            "released drawdown cooldown for %d unsubmitted order(s): %s",
+            len(released),
+            ", ".join(released),
+        )
+
+    return released
+
+
 #     ================================
 # --> Agent review
 #     ================================
@@ -334,13 +354,13 @@ def review_drawdowns(
 def size_drawdown_orders(
     strategy: Strategy,
     orders: list[tuple[DrawdownBreach, DrawdownDecision]],
-) -> tuple[list[tuple[str, int, str]], list[tuple[str, int, str]]]:
+) -> tuple[list[SizedOrder], list[SizedOrder]]:
     """Size trim/exit/add decisions into whole-share sell and buy lists.
 
     Returns ``(sells, buys)`` as ``(ticker, qty, label)`` tuples. Does not submit.
     """
-    sells: list[tuple[str, int, str]] = []
-    buys: list[tuple[str, int, str]] = []
+    sells: list[SizedOrder] = []
+    buys: list[SizedOrder] = []
 
     if not orders:
         return sells, buys
@@ -357,7 +377,7 @@ def size_drawdown_orders(
                 decision.ticker,
             )
 
-        held = held_shares(strategy, ticker)
+        held = signed_shares(strategy, ticker)
 
         # Max whole shares we can sell without going short of a fractional remainder.
         held_whole = math.floor(held)
@@ -417,7 +437,7 @@ def size_drawdown_orders(
 
 def estimate_freed_capital(
     strategy: Strategy,
-    sells: list[tuple[str, int, str]],
+    sells: list[SizedOrder],
 ) -> float:
     """Estimate cash raised by sized sell orders at last price.
 
@@ -462,14 +482,16 @@ def estimate_freed_capital(
 #     ================================
 
 
-def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> int:
+def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> tuple[int, list[str]]:
     """Submit one side of the pending book, draining rows as they are attempted.
 
     Each row is removed before it is sent so a failure can never resubmit it on
     a later flush. Sell quantities are re-clamped to the live position because
-    the book was sized at the previous close. Returns the number submitted.
+    the book was sized at the previous close. Return the number submitted and
+    the tickers whose submission raised.
     """
     submitted = 0
+    failed: list[str] = []
 
     while rows:
         ticker, qty, label = rows.pop(0)
@@ -477,7 +499,7 @@ def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> int:
         # The position may have shrunk since sizing; selling more than we hold
         # would open a short in a long-only sleeve.
         if side == "sell":
-            qty = whole_share_qty(qty, cap=math.floor(held_shares(strategy, ticker)))
+            qty = whole_share_qty(qty, cap=math.floor(signed_shares(strategy, ticker)))
 
             if qty <= 0:
                 log.warning("%s: position gone since sizing — skipping %s", ticker, label)
@@ -496,23 +518,27 @@ def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> int:
             log.exception(
                 "%s: %s %d shares failed (%s) — dropped, not retried", ticker, side, qty, label
             )
+            failed.append(ticker)
             continue
 
         submitted += 1
         log.info("%s: market %s %d shares (%s)", ticker, side, qty, label)
 
-    return submitted
+    return submitted, failed
 
 
 def submit_drawdown_orders(
     strategy: Strategy,
-    pending_drawdown_orders: OrderBook,
+    portfolio: Portfolio,
+    sells: list[SizedOrder],
+    buys: list[SizedOrder],
 ) -> bool:
     """Submit pre-sized market sell then buy orders from the pending book.
 
-    Sells go first so cash is free before any adds. Drains the book as it goes,
-    so only rows never attempted survive a mid-flight failure. Returns False
-    when the market is closed and nothing was attempted.
+    Sells go first so cash is free before any adds. Drains both lists as it
+    goes, so a mid-flight failure never resubmits. Names whose submission
+    raised have their review cooldown released so tonight's review picks them
+    up again. Returns False when the market is closed and nothing was attempted.
     """
     # If the market is open, submit the orders, otherwise skip them
     if not strategy.broker.is_market_open():
@@ -521,10 +547,15 @@ def submit_drawdown_orders(
 
     log.info("market is open - submitting pending drawdown orders")
 
-    sold = _submit_side(strategy, pending_drawdown_orders["sells"], "sell")
-    bought = _submit_side(strategy, pending_drawdown_orders["buys"], "buy")
+    sold, failed_sells = _submit_side(strategy, sells, "sell")
+    bought, failed_buys = _submit_side(strategy, buys, "buy")
 
     log.info("drawdown order submit complete: %d sell(s), %d buy(s)", sold, bought)
+
+    # A dropped row means the agent's decision never reached the broker. Without
+    # this the name would sit out the full cooldown unmanaged — an exit flagged
+    # at -25% would quietly stay on the book for two weeks.
+    release_drawdown_cooldowns(portfolio, failed_sells + failed_buys)
 
     return True
 
@@ -537,19 +568,19 @@ def submit_drawdown_orders(
 def manage_drawdowns(
     strategy: Strategy,
     portfolio: Portfolio,
-) -> tuple[list[SizedOrder], list[SizedOrder]] | None:
+) -> tuple[list[SizedOrder], list[SizedOrder]]:
     """Review drawdowns and return newly sized ``(sells, buys)``.
 
-    Does not mutate ``strategy.pending_drawdown_orders`` — the strategy owns
-    that book and appends. Returns ``None`` when there is nothing new to add
-    (no breaches, holds only, or everything sized to zero shares).
+    Does not mutate the strategy's pending book — the strategy owns that and
+    appends. Both lists are empty when there is nothing new to add (no
+    breaches, holds only, or everything sized to zero shares).
     """
 
     # 1. check for drawdown breaches in the portfolio (broker api)
     breaches = check_for_drawdown_breaches(strategy, portfolio)
 
     if not breaches:
-        return None
+        return [], []
 
     # 2. run the agent on the freshly identified tickers in a drawdown breach
     results = review_drawdowns(breaches)
@@ -579,7 +610,7 @@ def manage_drawdowns(
     # but do not size or reallocate.
     if not orders:
         log.info("no actionable drawdown orders (hold-only or no successful actions)")
-        return None
+        return [], []
 
     # 4. Size actionable decisions and estimate cash raised by sells.
     sells, buys = size_drawdown_orders(strategy, orders)
@@ -587,7 +618,7 @@ def manage_drawdowns(
     # Everything skipped at size (no position / zero whole shares) — nothing to append.
     if not sells and not buys:
         log.info("actionable decisions sized to zero whole shares — nothing to queue")
-        return None
+        return [], []
 
     freed_capital = estimate_freed_capital(strategy, sells)
 

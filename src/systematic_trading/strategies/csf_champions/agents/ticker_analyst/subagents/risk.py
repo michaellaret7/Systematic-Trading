@@ -109,4 +109,4 @@ RISK_SUBAGENT_CONFIG = SubAgentConfig(
     tools=(),
     provider="openrouter",
     model="z-ai/glm-5.2",
-)  
+)

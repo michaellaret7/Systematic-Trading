@@ -66,7 +66,8 @@ class FakeStrategy:
         self._positions = positions or []
         self._as_of = as_of
         self._orders = orders or {}
-        self.pending_drawdown_orders = {"sells": [], "buys": []}
+        self.pending_sells: list[tuple[str, int, str]] = []
+        self.pending_buys: list[tuple[str, int, str]] = []
         self.broker = SimpleNamespace(
             api=SimpleNamespace(
                 get_all_positions=self._get_positions,
@@ -499,55 +500,103 @@ def test_size_uses_the_breach_ticker_not_the_agent_ticker() -> None:
     assert buys == []
 
 
+def test_size_skips_a_short_position_in_a_long_only_sleeve() -> None:
+    """A negative position must never size into a sell."""
+    strategy = OrderStrategy(held={"AAPL": -10.0})
+    decision = DrawdownDecision(ticker="AAPL", action="exit", reason="short", amount=None)
+
+    sells, buys = risk.size_drawdown_orders(strategy, [(_breach("AAPL"), decision)])
+
+    assert sells == []
+    assert buys == []
+
+
 def test_submit_reclamps_stale_sell_to_the_live_position() -> None:
     """A book sized yesterday can never sell more than is held today."""
     strategy = OrderStrategy(held={"AAPL": 4.0})
-    book = {"sells": [("AAPL", 10, "exit")], "buys": []}
+    sells = [("AAPL", 10, "exit")]
 
-    assert risk.submit_drawdown_orders(strategy, book) is True
+    assert risk.submit_drawdown_orders(strategy, Portfolio(), sells, []) is True
     assert strategy.submitted == [("AAPL", 4, "sell")]
 
 
 def test_submit_skips_a_sell_whose_position_is_gone() -> None:
     """No position left means no order, and the row is still drained."""
     strategy = OrderStrategy(held={})
-    book = {"sells": [("AAPL", 10, "exit")], "buys": []}
+    sells = [("AAPL", 10, "exit")]
 
-    risk.submit_drawdown_orders(strategy, book)
+    risk.submit_drawdown_orders(strategy, Portfolio(), sells, [])
 
     assert strategy.submitted == []
-    assert book == {"sells": [], "buys": []}
+    assert sells == []
+
+
+def test_submit_never_sells_into_a_short_position() -> None:
+    """A short reads as negative, so the clamp blocks the sell instead of allowing it."""
+    strategy = OrderStrategy(held={"AAPL": -10.0})
+    sells = [("AAPL", 10, "exit")]
+
+    risk.submit_drawdown_orders(strategy, Portfolio(), sells, [])
+
+    assert strategy.submitted == []
 
 
 def test_submit_drains_the_book_and_never_retries_a_failure() -> None:
     """A rejected order is dropped, not left behind to resubmit tomorrow."""
     strategy = OrderStrategy(held={"AAPL": 10.0, "MSFT": 8.0}, reject={"AAPL"})
-    book = {
-        "sells": [("AAPL", 10, "exit"), ("MSFT", 4, "trim 50%")],
-        "buys": [],
+    sells = [("AAPL", 10, "exit"), ("MSFT", 4, "trim 50%")]
+
+    assert risk.submit_drawdown_orders(strategy, Portfolio(), sells, []) is True
+    assert strategy.submitted == [("MSFT", 4, "sell")]
+    assert sells == []
+
+
+def test_submit_releases_the_cooldown_for_a_dropped_order() -> None:
+    """A failed exit must be re-reviewed tonight, not silently parked for 14 days."""
+    strategy = OrderStrategy(held={"AAPL": 10.0, "MSFT": 8.0}, reject={"AAPL"})
+    portfolio = Portfolio()
+    portfolio.drawdown_reviews = {
+        "AAPL": ("AAPL", -30.0, date(2026, 7, 30)),
+        "MSFT": ("MSFT", -28.0, date(2026, 7, 30)),
     }
 
-    assert risk.submit_drawdown_orders(strategy, book) is True
-    assert strategy.submitted == [("MSFT", 4, "sell")]
-    assert book == {"sells": [], "buys": []}
+    risk.submit_drawdown_orders(strategy, portfolio, [("AAPL", 10, "exit")], [])
+
+    assert "AAPL" not in portfolio.drawdown_reviews
+    # A name that submitted fine keeps its cooldown.
+    assert "MSFT" in portfolio.drawdown_reviews
+
+
+def test_submit_keeps_the_cooldown_for_a_skipped_sell() -> None:
+    """A position already gone was handled by other means — no re-review needed."""
+    strategy = OrderStrategy(held={})
+    portfolio = Portfolio()
+    portfolio.drawdown_reviews = {"AAPL": ("AAPL", -30.0, date(2026, 7, 30))}
+
+    risk.submit_drawdown_orders(strategy, portfolio, [("AAPL", 10, "exit")], [])
+
+    assert "AAPL" in portfolio.drawdown_reviews
 
 
 def test_submit_keeps_the_book_when_the_market_is_closed() -> None:
     """Nothing is attempted, so every row survives for a later flush."""
     strategy = OrderStrategy(held={"AAPL": 10.0}, market_open=False)
-    book = {"sells": [("AAPL", 10, "exit")], "buys": [("MSFT", 2, "add 25%")]}
+    sells = [("AAPL", 10, "exit")]
+    buys = [("MSFT", 2, "add 25%")]
 
-    assert risk.submit_drawdown_orders(strategy, book) is False
+    assert risk.submit_drawdown_orders(strategy, Portfolio(), sells, buys) is False
     assert strategy.submitted == []
-    assert book == {"sells": [("AAPL", 10, "exit")], "buys": [("MSFT", 2, "add 25%")]}
+    assert sells == [("AAPL", 10, "exit")]
+    assert buys == [("MSFT", 2, "add 25%")]
 
 
 def test_submit_sends_sells_before_buys() -> None:
     """Cash-raising sells must reach the broker ahead of any add."""
     strategy = OrderStrategy(held={"AAPL": 10.0, "MSFT": 8.0})
-    book = {"sells": [("AAPL", 5, "trim 50%")], "buys": [("MSFT", 2, "add 25%")]}
 
-    risk.submit_drawdown_orders(strategy, book)
+    risk.submit_drawdown_orders(
+        strategy, Portfolio(), [("AAPL", 5, "trim 50%")], [("MSFT", 2, "add 25%")]
+    )
 
     assert strategy.submitted == [("AAPL", 5, "sell"), ("MSFT", 2, "buy")]
 
@@ -591,8 +640,7 @@ def test_manage_drawdowns_returns_sized_rows_and_records_successes(
         ],
         as_of=date(2026, 7, 30),
     )
-    existing = {"sells": [("OLD", 2, "exit")], "buys": []}
-    strategy.pending_drawdown_orders = existing
+    strategy.pending_sells = [("OLD", 2, "exit")]
     portfolio = Portfolio()
     agent = FakeAgent(
         action_by_ticker={
@@ -605,14 +653,12 @@ def test_manage_drawdowns_returns_sized_rows_and_records_successes(
     monkeypatch.setattr(risk, "MAX_WORKERS", 1)
     _stub_sizing(monkeypatch)
 
-    sized = risk.manage_drawdowns(strategy, portfolio)
+    sells, buys = risk.manage_drawdowns(strategy, portfolio)
 
-    assert sized is not None
-    sells, buys = sized
     assert {row[0] for row in sells} == {"TRIM", "EXIT"}
     assert buys == []
     # Strategy-owned book is untouched by manage.
-    assert strategy.pending_drawdown_orders == existing
+    assert strategy.pending_sells == [("OLD", 2, "exit")]
     # All successful agent runs enter cooldown, including hold.
     assert set(portfolio.drawdown_reviews) == {"TRIM", "HOLD", "EXIT"}
     assert "OK" not in portfolio.drawdown_reviews
@@ -633,10 +679,9 @@ def test_manage_drawdowns_returns_empty_when_no_breaches(
 
     monkeypatch.setattr(risk, "build_risk_manager", boom)
 
-    sized = risk.manage_drawdowns(strategy, portfolio)
-
-    assert sized is None
-    assert strategy.pending_drawdown_orders == {"sells": [], "buys": []}
+    assert risk.manage_drawdowns(strategy, portfolio) == ([], [])
+    assert strategy.pending_sells == []
+    assert strategy.pending_buys == []
     assert portfolio.drawdown_reviews == {}
 
 
@@ -648,8 +693,7 @@ def test_manage_drawdowns_hold_only_skips_sizing_and_preserves_pending(
         positions=[FakePosition("HOLD", unrealized_plpc=-0.30, avg_entry_price=50.0)],
         as_of=date(2026, 7, 30),
     )
-    existing = {"sells": [("OLD", 3, "exit")], "buys": []}
-    strategy.pending_drawdown_orders = existing
+    strategy.pending_sells = [("OLD", 3, "exit")]
     portfolio = Portfolio()
     agent = FakeAgent(action="hold")
     monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
@@ -660,10 +704,8 @@ def test_manage_drawdowns_hold_only_skips_sizing_and_preserves_pending(
 
     monkeypatch.setattr(risk, "size_drawdown_orders", boom_size)
 
-    sized = risk.manage_drawdowns(strategy, portfolio)
-
-    assert sized is None
-    assert strategy.pending_drawdown_orders == existing
+    assert risk.manage_drawdowns(strategy, portfolio) == ([], [])
+    assert strategy.pending_sells == [("OLD", 3, "exit")]
     assert set(portfolio.drawdown_reviews) == {"HOLD"}
 
 

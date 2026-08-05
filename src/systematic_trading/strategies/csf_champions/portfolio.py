@@ -49,7 +49,6 @@ class Portfolio:
         # ticker → (ticker, drawdown_pct, review_date); date is calendar day only
         self.drawdown_reviews: dict[str, tuple[str, float, date]] = {}
 
-
     @property
     def total_weight(self) -> float:
         """Total allocation percentage across current holdings.

@@ -4,7 +4,6 @@ import types
 
 from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 from systematic_trading.strategies.csf_champions.strategy import CsfChampions
-from systematic_trading.strategies.csf_champions.workflows.rsk_mgmt import empty_order_book
 
 
 class InitializeContext:
@@ -26,7 +25,9 @@ class LifecycleContext:
 
     def __init__(self) -> None:
         self.portfolio = Portfolio()
-        self.pending_drawdown_orders = empty_order_book()
+        self.pending_sells: list = []
+        self.pending_buys: list = []
+        self.is_backtesting = False
 
 
 def test_initialize_sets_intraday_cadence_and_risk_state() -> None:
@@ -42,7 +43,8 @@ def test_initialize_sets_intraday_cadence_and_risk_state() -> None:
 
     assert context.sleeptime == "2H"
     assert isinstance(context.portfolio, Portfolio)
-    assert context.pending_drawdown_orders == empty_order_book()
+    assert context.pending_sells == []
+    assert context.pending_buys == []
     assert context.cron_schedule == "0 10 * * 1-5"
     assert context.cron_callback == context.flush_pending_drawdown_orders
 
@@ -70,25 +72,23 @@ def test_flush_pending_drawdown_orders_submits_the_book(monkeypatch) -> None:
     from systematic_trading.strategies.csf_champions import strategy as strategy_module
 
     context = LifecycleContext()
-    context.pending_drawdown_orders = {
-        "sells": [("AAPL", 10, "exit")],
-        "buys": [],
-    }
+    context.pending_sells = [("AAPL", 10, "exit")]
 
     applied: list = []
 
-    def fake_submit(strategy, book) -> bool:
-        applied.append({side: list(rows) for side, rows in book.items()})
-        book["sells"].clear()
-        book["buys"].clear()
+    def fake_submit(strategy, portfolio, sells, buys) -> bool:
+        applied.append((portfolio, list(sells), list(buys)))
+        sells.clear()
+        buys.clear()
         return True
 
     monkeypatch.setattr(strategy_module, "submit_drawdown_orders", fake_submit)
 
     CsfChampions.flush_pending_drawdown_orders(context)
 
-    assert applied == [{"sells": [("AAPL", 10, "exit")], "buys": []}]
-    assert context.pending_drawdown_orders == empty_order_book()
+    assert applied == [(context.portfolio, [("AAPL", 10, "exit")], [])]
+    assert context.pending_sells == []
+    assert context.pending_buys == []
 
 
 def test_flush_pending_drawdown_orders_keeps_book_when_not_submitted(monkeypatch) -> None:
@@ -96,8 +96,7 @@ def test_flush_pending_drawdown_orders_keeps_book_when_not_submitted(monkeypatch
     from systematic_trading.strategies.csf_champions import strategy as strategy_module
 
     context = LifecycleContext()
-    book = {"sells": [("AAPL", 10, "exit")], "buys": []}
-    context.pending_drawdown_orders = book
+    context.pending_sells = [("AAPL", 10, "exit")]
 
     monkeypatch.setattr(
         strategy_module,
@@ -107,7 +106,7 @@ def test_flush_pending_drawdown_orders_keeps_book_when_not_submitted(monkeypatch
 
     CsfChampions.flush_pending_drawdown_orders(context)
 
-    assert context.pending_drawdown_orders == book
+    assert context.pending_sells == [("AAPL", 10, "exit")]
 
 
 def test_flush_pending_drawdown_orders_noop_when_empty(monkeypatch) -> None:
@@ -123,7 +122,8 @@ def test_flush_pending_drawdown_orders_noop_when_empty(monkeypatch) -> None:
 
     CsfChampions.flush_pending_drawdown_orders(context)
 
-    assert context.pending_drawdown_orders == empty_order_book()
+    assert context.pending_sells == []
+    assert context.pending_buys == []
 
 
 def test_after_market_closes_appends_sized_rows(monkeypatch) -> None:
@@ -131,10 +131,7 @@ def test_after_market_closes_appends_sized_rows(monkeypatch) -> None:
     from systematic_trading.strategies.csf_champions import strategy as strategy_module
 
     context = LifecycleContext()
-    context.pending_drawdown_orders = {
-        "sells": [("OLD", 2, "exit")],
-        "buys": [],
-    }
+    context.pending_sells = [("OLD", 2, "exit")]
 
     monkeypatch.setattr(
         strategy_module,
@@ -144,26 +141,58 @@ def test_after_market_closes_appends_sized_rows(monkeypatch) -> None:
 
     CsfChampions.after_market_closes(context)
 
-    assert context.pending_drawdown_orders == {
-        "sells": [("OLD", 2, "exit"), ("MSFT", 5, "trim 50%")],
-        "buys": [("AAPL", 1, "add 25%")],
-    }
+    assert context.pending_sells == [("OLD", 2, "exit"), ("MSFT", 5, "trim 50%")]
+    assert context.pending_buys == [("AAPL", 1, "add 25%")]
 
 
-def test_after_market_closes_noop_when_manage_returns_none(monkeypatch) -> None:
-    """None from manage leaves the pending book untouched."""
+def test_after_market_closes_noop_when_nothing_sized(monkeypatch) -> None:
+    """Empty lists from manage leave the pending book untouched."""
     from systematic_trading.strategies.csf_champions import strategy as strategy_module
 
     context = LifecycleContext()
-    existing = {"sells": [("OLD", 2, "exit")], "buys": []}
-    context.pending_drawdown_orders = existing
+    context.pending_sells = [("OLD", 2, "exit")]
 
     monkeypatch.setattr(
         strategy_module,
         "manage_drawdowns",
-        lambda strategy, portfolio: None,
+        lambda strategy, portfolio: ([], []),
     )
 
     CsfChampions.after_market_closes(context)
 
-    assert context.pending_drawdown_orders == existing
+    assert context.pending_sells == [("OLD", 2, "exit")]
+    assert context.pending_buys == []
+
+
+def test_trading_iteration_flushes_only_in_backtest(monkeypatch) -> None:
+    """Crons never register in backtest, so the heartbeat has to flush there."""
+    from systematic_trading.strategies.csf_champions import strategy as strategy_module
+
+    flushed: list[str] = []
+
+    monkeypatch.setattr(
+        strategy_module,
+        "submit_drawdown_orders",
+        lambda strategy, portfolio, sells, buys: flushed.append("called") or True,
+    )
+
+    live = LifecycleContext()
+    live.pending_sells = [("AAPL", 10, "exit")]
+    live.flush_pending_drawdown_orders = types.MethodType(
+        CsfChampions.flush_pending_drawdown_orders, live
+    )
+
+    CsfChampions.on_trading_iteration(live)
+
+    assert flushed == []
+
+    backtest = LifecycleContext()
+    backtest.is_backtesting = True
+    backtest.pending_sells = [("AAPL", 10, "exit")]
+    backtest.flush_pending_drawdown_orders = types.MethodType(
+        CsfChampions.flush_pending_drawdown_orders, backtest
+    )
+
+    CsfChampions.on_trading_iteration(backtest)
+
+    assert flushed == ["called"]
