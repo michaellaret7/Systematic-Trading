@@ -45,7 +45,7 @@ DrawdownBreach = tuple[str, float, float, float, date]
 
 
 #     ================================
-# --> Helper funcs
+# --> Helpers
 #     ================================
 
 
@@ -142,6 +142,11 @@ def _position_drawdown(api, position, ticker: str) -> tuple[float, float]:
     return round(give_back, 2), pnl_pct
 
 
+#     ================================
+# --> Drawdown detection
+#     ================================
+
+
 def check_for_drawdown_breaches(
     strategy: Strategy,
     portfolio: Portfolio,
@@ -190,6 +195,11 @@ def check_for_drawdown_breaches(
     return breaches
 
 
+#     ================================
+# --> Review cooldown
+#     ================================
+
+
 def clear_expired_drawdown_reviews(
     strategy: Strategy,
     portfolio: Portfolio,
@@ -225,6 +235,78 @@ def clear_expired_drawdown_reviews(
         log.info("no drawdown reviews outside the %d-day cooldown", window_days)
 
     return stale
+
+
+#     ================================
+# --> Agent review
+#     ================================
+
+
+def _deploy_single_drawdown_agent(
+    breach: DrawdownBreach,
+) -> tuple[DrawdownBreach, DrawdownDecision]:
+    """Run a fresh risk-manager agent on one breach."""
+    # Unpack the breach tuple into its components
+    ticker, give_back, pnl_pct, avg_entry, as_of = breach
+
+    # Create agent instance of risk mngr agent (has to be built first)
+    agent = build_risk_manager()
+
+    task = (
+        f"Review drawdown on {ticker}: {give_back}% below its best close "
+        f"since we opened it, unrealized pnl {pnl_pct}%, "
+        f"avg entry ${avg_entry:.2f}, as of {as_of.isoformat()}. "
+        f"Return a decision: hold, trim, exit, or add, with a short reason. "
+        f"If add or trim, specify the amount."
+    )
+
+    result = agent.run(task, sink=LogSink(f"risk_{ticker}"))
+
+    if not isinstance(result, DrawdownDecision):
+        raise TypeError(f"risk manager must return DrawdownDecision, got {type(result).__name__}")
+
+    return breach, result
+
+
+def review_drawdowns(
+    breaches: list[DrawdownBreach],
+) -> list[tuple[DrawdownBreach, DrawdownDecision]]:
+    """Run the drawdown agent on breached tickers; return a decision per success."""
+    # ingest the list of tickers passed from the check_for_drawdown_breaches function
+    if not breaches:
+        return []
+
+    # Create agent instance of risk mngr agent (has to be built first)
+    # spawn the num workers per agent (each agent reviews one ticker)
+    log.info("reviewing %d drawdown breach(es) with %d workers", len(breaches), MAX_WORKERS)
+
+    # Create an empty list to store the decisions
+    results: list[tuple[DrawdownBreach, DrawdownDecision]] = []
+
+    # once the agents are spawned, wait for them to finish
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {
+            pool.submit(_deploy_single_drawdown_agent, breach): breach for breach in breaches
+        }
+
+        for future in as_completed(futures):
+            breach = futures[future]
+            ticker = breach[0]
+
+            try:
+                # once the agents are finished, return the decisions
+                results.append(future.result())
+                log.info("%s drawdown review done", ticker)
+            except Exception:
+                log.exception("%s drawdown review failed — not recording", ticker)
+
+    return results
+
+
+#     ================================
+# --> Order sizing & capital
+#     ================================
+
 
 def size_drawdown_orders(
     strategy: Strategy,
@@ -341,6 +423,11 @@ def estimate_freed_capital(
     return freed
 
 
+#     ================================
+# --> Order submission
+#     ================================
+
+
 def submit_drawdown_orders(
     strategy: Strategy,
     sells: list[tuple[str, int, str]],
@@ -383,70 +470,9 @@ def submit_drawdown_orders(
     )
 
 
-def _deploy_single_drawdown_agent(
-    breach: DrawdownBreach,
-) -> tuple[DrawdownBreach, DrawdownDecision]:
-    """Run a fresh risk-manager agent on one breach."""
-    # Unpack the breach tuple into its components
-    ticker, give_back, pnl_pct, avg_entry, as_of = breach
-
-    # Create agent instance of risk mngr agent (has to be built first)
-    agent = build_risk_manager()
-
-    task = (
-        f"Review drawdown on {ticker}: {give_back}% below its best close "
-        f"since we opened it, unrealized pnl {pnl_pct}%, "
-        f"avg entry ${avg_entry:.2f}, as of {as_of.isoformat()}. "
-        f"Return a decision: hold, trim, exit, or add, with a short reason. "
-        f"If add or trim, specify the amount."
-    )
-
-    result = agent.run(task, sink=LogSink(f"risk_{ticker}"))
-
-    if not isinstance(result, DrawdownDecision):
-        raise TypeError(f"risk manager must return DrawdownDecision, got {type(result).__name__}")
-
-    return breach, result
-
-
-def review_drawdowns(
-    breaches: list[DrawdownBreach],
-) -> list[tuple[DrawdownBreach, DrawdownDecision]]:
-    """Run the drawdown agent on breached tickers; return a decision per success."""
-    # ingest the list of tickers passed from the check_for_drawdown_breaches function
-    if not breaches:
-        return []
-
-    # Create agent instance of risk mngr agent (has to be built first)
-    # spawn the num workers per agent (each agent reviews one ticker)
-    log.info("reviewing %d drawdown breach(es) with %d workers", len(breaches), MAX_WORKERS)
-
-    # Create an empty list to store the decisions
-    results: list[tuple[DrawdownBreach, DrawdownDecision]] = []
-
-    # once the agents are spawned, wait for them to finish
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {
-            pool.submit(_deploy_single_drawdown_agent, breach): breach for breach in breaches
-        }
-
-        for future in as_completed(futures):
-            breach = futures[future]
-            ticker = breach[0]
-
-            try:
-                # once the agents are finished, return the decisions
-                results.append(future.result())
-                log.info("%s drawdown review done", ticker)
-            except Exception:
-                log.exception("%s drawdown review failed — not recording", ticker)
-
-    return results
-
-
-# =========================================
-# --> Main workflow function
-# =========================================
+#     ================================
+# --> Main workflow
+#     ================================
 
 
 def manage_drawdowns(
