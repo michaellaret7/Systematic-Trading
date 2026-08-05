@@ -42,92 +42,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
-          track_progress: true
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
 
-          prompt: |
-            REPOSITORY: ${{ github.repository }}
-            PULL REQUEST: ${{ github.event.pull_request.number }}
-            BASE BRANCH: ${{ github.event.pull_request.base.ref }}
-            HEAD BRANCH: ${{ github.event.pull_request.head.ref }}
-            BASE SHA: ${{ github.event.pull_request.base.sha }}
-            HEAD SHA: ${{ github.event.pull_request.head.sha }}
-
-            Review the changes introduced by this pull request.
-
-            ## Method
-
-            1. Read `.claude/CLAUDE.md` first. It defines this repository's
-               architecture and development guidelines, and it is the standard
-               you are reviewing against.
-            2. Inspect the full PR diff:
-               `git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}`
-               and/or `gh pr diff ${{ github.event.pull_request.number }}`.
-            3. For every meaningful changed symbol, use Read / Grep / Glob to
-               inspect surrounding code and search the repo for existing
-               helpers before claiming something is new or missing.
-            4. Post findings as inline comments on the affected lines when
-               possible. Finish with one concise top-level PR comment.
-
-            ## Primary focus: design and simplicity
-
-            This is the main job. For every meaningful change, ask whether the
-            same result could be achieved with less code, fewer concepts, or
-            fewer moving parts, and challenge it when it could.
-
-            Flag:
-            - Anything more complex than the problem requires (KISS): clever
-              code where straightforward code would do, or a solution whose
-              complexity exceeds the problem it solves. If a simpler
-              implementation exists, describe it concretely.
-            - Speculative generality (YAGNI): configurability, flags, hooks,
-              abstractions, or parameters that no current caller uses.
-            - Duplicated logic (DRY): a new helper that reimplements something
-              already in the codebase. Search before concluding it is new.
-            - Single-use abstractions: a class, wrapper, factory, or layer of
-              indirection with exactly one caller and no clear reason to exist.
-            - Code that could simply be deleted. No part is the best part.
-            - Functions doing several unrelated things, or that would read more
-              clearly split apart or, conversely, inlined.
-            - Backwards-compatibility shims, dead branches, or defensive error
-              handling for scenarios that cannot occur.
-            - Missing or incorrect type hints, and unclear naming.
-
-            When you propose a simplification, show the shape of the better
-            version. A vague "this could be simpler" is not a useful finding.
-
-            ## Also flag
-
-            - Definite correctness bugs
-            - Security vulnerabilities
-            - Incorrect error handling
-            - Race conditions or concurrency issues
-            - Data loss or data corruption risks
-            - Breaking API or database changes
-            - Meaningful performance regressions
-            - Missing tests for important behavior
-
-            ## Do not comment on
-
-            - Formatting or line length; ruff handles that
-            - Naming or style preferences with no readability impact
-            - Hypothetical problems without a realistic failure case
-            - Code that was not changed by this pull request, unless the change
-              duplicates it or should have reused it
-            - Refactors that trade one form of complexity for another
-
-            Only report high-confidence, actionable findings. A short review
-            with three real simplifications is better than a long one padded
-            with observations.
-
-            Add inline comments on the affected lines when possible (pass
-            `confirmed: true` to the inline-comment tool). Finish with a
-            concise top-level summary that states whether the change is as
-            simple as it could be.
-
-            If there are no significant findings, explicitly say:
-            "No blocking issues found."
+          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
 
           claude_args: |
             --model claude-opus-5
-            --max-turns 40
-            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git grep:*)"
+            --max-turns 60
