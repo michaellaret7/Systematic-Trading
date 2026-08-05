@@ -57,7 +57,13 @@ DO_API = "https://api.digitalocean.com/v2"
 # basic shared-CPU, `g-` general purpose (4 GB/vCPU), `c-` CPU-optimized
 # (2 GB/vCPU). The `g-`/`c-` classes are gated behind an account-tier increase
 # (422 "size is currently restricted"), so we stay on basic shared-CPU.
-DEFAULT_SIZE = "s-4vcpu-8gb"
+#
+# Sized from measured usage, not guessed. Peaks across the S3 run logs
+# (``MONITOR_SNIPPET`` samples memory every 30s) and the DO monitoring API:
+# the live strategy holds 1.2 GB and ~0.5 vCPU, the trade-ideas job peaks at
+# 1.6 GB, and neither has ever recorded an oom_kill. 4 GB / 2 vCPU keeps
+# roughly 2.5x headroom on memory at half the price of the 8 GB size.
+DEFAULT_SIZE = "s-2vcpu-4gb"
 DEFAULT_REGION = "nyc3"
 
 # Ubuntu 24.04 matches the RunPod base image, so the shared bootstrap applies

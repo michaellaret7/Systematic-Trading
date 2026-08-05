@@ -238,4 +238,4 @@ def get_prices(
 if __name__ == "__main__":
     print(get_prices(ticker="AAPL", days_back=10))
     print()
-    print(get_prices(ticker="AAPL", days_back=30, technicals=["volatility","momentum","trend"]))
+    print(get_prices(ticker="AAPL", days_back=30, technicals=["volatility", "momentum", "trend"]))

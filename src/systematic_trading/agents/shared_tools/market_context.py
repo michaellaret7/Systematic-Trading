@@ -376,6 +376,3 @@ def get_market_context(
         f"\n[industry]\n{_industry_rank(symbol, tags, universe)}\n"
         f"\n[sector breadth]\n{_breadth(peers, start)}"
     )
-
-
-
