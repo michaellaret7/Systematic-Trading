@@ -65,8 +65,8 @@ def test_before_market_opens_clears_expired_reviews(monkeypatch) -> None:
     assert called == [(context, context.portfolio)]
 
 
-def test_flush_pending_drawdown_orders_submits_and_clears(monkeypatch) -> None:
-    """10:00 flush submits the book once, then empties it."""
+def test_flush_pending_drawdown_orders_submits_the_book(monkeypatch) -> None:
+    """10:00 flush hands the book to submit, which drains rows as it sends them."""
     from systematic_trading.strategies.csf_champions import strategy as strategy_module
 
     context = LifecycleContext()
@@ -76,11 +76,14 @@ def test_flush_pending_drawdown_orders_submits_and_clears(monkeypatch) -> None:
     }
 
     applied: list = []
-    monkeypatch.setattr(
-        strategy_module,
-        "submit_drawdown_orders",
-        lambda strategy, book: applied.append(dict(book)) or True,
-    )
+
+    def fake_submit(strategy, book) -> bool:
+        applied.append({side: list(rows) for side, rows in book.items()})
+        book["sells"].clear()
+        book["buys"].clear()
+        return True
+
+    monkeypatch.setattr(strategy_module, "submit_drawdown_orders", fake_submit)
 
     CsfChampions.flush_pending_drawdown_orders(context)
 

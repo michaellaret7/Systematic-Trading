@@ -137,21 +137,24 @@ class CsfChampions(Strategy):
     #     ================================
 
     def flush_pending_drawdown_orders(self) -> None:
-        """Cron (10:00 weekdays): submit stashed risk orders; clear only on success."""
+        """Cron (10:00 weekdays): submit stashed risk orders.
+
+        The book drains itself as each row is attempted, so there is nothing to
+        clear here — whatever survives was never sent and is retried next flush.
+        """
 
         book = self.pending_drawdown_orders
-        sells = book["sells"]
-        buys = book["buys"]
 
-        if not sells and not buys:
+        if not book["sells"] and not book["buys"]:
             log.info("10:00 flush: no pending drawdown orders")
             return
 
         # False when market is closed — leave the stash for a later day.
-        submitted = submit_drawdown_orders(self, book)
-
-        if submitted:
-            self.pending_drawdown_orders = empty_order_book()
-            log.info("10:00 flush: submitted and cleared pending drawdown orders")
+        if submit_drawdown_orders(self, book):
+            log.info(
+                "10:00 flush: submitted; %d sell(s), %d buy(s) still pending",
+                len(book["sells"]),
+                len(book["buys"]),
+            )
         else:
             log.info("10:00 flush: market closed — pending drawdown orders kept")

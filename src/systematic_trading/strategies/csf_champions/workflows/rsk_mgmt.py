@@ -49,13 +49,16 @@ SizedOrder = tuple[str, int, str]
 # Pending risk book stashed on the strategy between AMC and the 10:00 cron.
 OrderBook = dict[str, list[SizedOrder]]
 
+
 def empty_order_book() -> OrderBook:
     """Return an empty sell/buy pending order book."""
     return {"sells": [], "buys": []}
 
+
 #     ================================
 # --> Helpers
 #     ================================
+
 
 def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
     """Round a share count to a non-negative whole number.
@@ -68,6 +71,13 @@ def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
         qty = min(qty, cap)
 
     return qty
+
+
+def held_shares(strategy: Strategy, ticker: str) -> float:
+    """Shares currently held in ``ticker``, unsigned. Returns 0.0 when flat."""
+    position = strategy.get_position(ticker)
+
+    return abs(float(position.quantity)) if position is not None else 0.0
 
 
 def entry_date(api, symbol: str, position_qty: float) -> date | None:
@@ -255,7 +265,7 @@ def _deploy_single_drawdown_agent(
     breach: DrawdownBreach,
 ) -> tuple[DrawdownBreach, DrawdownDecision]:
     """
-    Run a fresh risk-manager agent on one breach. 
+    Run a fresh risk-manager agent on one breach.
     Return a tuple of the breach and the decision returned by the agent.
     """
 
@@ -335,10 +345,19 @@ def size_drawdown_orders(
     if not orders:
         return sells, buys
 
-    for _breach, decision in orders:
-        ticker = decision.ticker.strip().upper()
-        position = strategy.get_position(ticker)
-        held = abs(float(position.quantity)) if position is not None else 0.0
+    for breach, decision in orders:
+        # The breach ticker came from Alpaca; decision.ticker is free text from
+        # the agent. Always size against the symbol we actually asked about.
+        ticker = breach[0]
+
+        if decision.ticker.strip().upper() != ticker:
+            log.warning(
+                "%s: agent returned ticker %s — sizing against the breach ticker",
+                ticker,
+                decision.ticker,
+            )
+
+        held = held_shares(strategy, ticker)
 
         # Max whole shares we can sell without going short of a fractional remainder.
         held_whole = math.floor(held)
@@ -420,7 +439,9 @@ def estimate_freed_capital(
         price = float(last_price)
 
         if not math.isfinite(price) or price <= 0:
-            log.warning("%s: invalid last price %s — excluding from freed capital", ticker, last_price)
+            log.warning(
+                "%s: invalid last price %s — excluding from freed capital", ticker, last_price
+            )
             continue
 
         total += qty * price
@@ -441,19 +462,58 @@ def estimate_freed_capital(
 #     ================================
 
 
+def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> int:
+    """Submit one side of the pending book, draining rows as they are attempted.
+
+    Each row is removed before it is sent so a failure can never resubmit it on
+    a later flush. Sell quantities are re-clamped to the live position because
+    the book was sized at the previous close. Returns the number submitted.
+    """
+    submitted = 0
+
+    while rows:
+        ticker, qty, label = rows.pop(0)
+
+        # The position may have shrunk since sizing; selling more than we hold
+        # would open a short in a long-only sleeve.
+        if side == "sell":
+            qty = whole_share_qty(qty, cap=math.floor(held_shares(strategy, ticker)))
+
+            if qty <= 0:
+                log.warning("%s: position gone since sizing — skipping %s", ticker, label)
+                continue
+
+        try:
+            order = strategy.create_order(
+                ticker,
+                qty,
+                side,
+                order_type="market",
+                time_in_force="day",
+            )
+            strategy.submit_order(order)
+        except Exception:
+            log.exception(
+                "%s: %s %d shares failed (%s) — dropped, not retried", ticker, side, qty, label
+            )
+            continue
+
+        submitted += 1
+        log.info("%s: market %s %d shares (%s)", ticker, side, qty, label)
+
+    return submitted
+
+
 def submit_drawdown_orders(
     strategy: Strategy,
     pending_drawdown_orders: OrderBook,
 ) -> bool:
     """Submit pre-sized market sell then buy orders from the pending book.
 
-    Sells go first so cash is free before any adds. Returns True when orders
-    were submitted; False when the market is closed so the caller can leave
-    the stash intact. Caller must skip empty books.
+    Sells go first so cash is free before any adds. Drains the book as it goes,
+    so only rows never attempted survive a mid-flight failure. Returns False
+    when the market is closed and nothing was attempted.
     """
-    sells = pending_drawdown_orders["sells"]
-    buys = pending_drawdown_orders["buys"]
-
     # If the market is open, submit the orders, otherwise skip them
     if not strategy.broker.is_market_open():
         log.info("market is closed - leaving pending drawdown orders in place")
@@ -461,33 +521,10 @@ def submit_drawdown_orders(
 
     log.info("market is open - submitting pending drawdown orders")
 
-    for ticker, qty, label in sells:
-        order = strategy.create_order(
-            ticker,
-            qty,
-            "sell",
-            order_type="market",
-            time_in_force="day",
-        )
-        strategy.submit_order(order)
-        log.info("%s: market sell %d shares (%s)", ticker, qty, label)
+    sold = _submit_side(strategy, pending_drawdown_orders["sells"], "sell")
+    bought = _submit_side(strategy, pending_drawdown_orders["buys"], "buy")
 
-    for ticker, qty, label in buys:
-        order = strategy.create_order(
-            ticker,
-            qty,
-            "buy",
-            order_type="market",
-            time_in_force="day",
-        )
-        strategy.submit_order(order)
-        log.info("%s: market buy %d shares (%s)", ticker, qty, label)
-
-    log.info(
-        "drawdown order submit complete: %d sell(s), %d buy(s)",
-        len(sells),
-        len(buys),
-    )
+    log.info("drawdown order submit complete: %d sell(s), %d buy(s)", sold, bought)
 
     return True
 

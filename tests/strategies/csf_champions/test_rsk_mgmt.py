@@ -453,6 +453,106 @@ def test_estimate_freed_capital_empty_sells() -> None:
 
 
 #     ================================
+# --> size_drawdown_orders & submission
+#     ================================
+
+
+class OrderStrategy:
+    """Strategy stub holding positions and recording submitted orders."""
+
+    def __init__(
+        self,
+        held: dict[str, float],
+        market_open: bool = True,
+        reject: set[str] | None = None,
+    ) -> None:
+        self._held = held
+        self._reject = reject or set()
+        self.broker = SimpleNamespace(is_market_open=lambda: market_open)
+        self.submitted: list[tuple[str, int, str]] = []
+
+    def get_position(self, ticker: str) -> SimpleNamespace | None:
+        held = self._held.get(ticker)
+
+        return SimpleNamespace(quantity=held) if held is not None else None
+
+    def create_order(
+        self, ticker: str, qty: int, side: str, order_type: str, time_in_force: str
+    ) -> tuple[str, int, str]:
+        return (ticker, qty, side)
+
+    def submit_order(self, order: tuple[str, int, str]) -> None:
+        if order[0] in self._reject:
+            raise RuntimeError(f"broker rejected {order[0]}")
+
+        self.submitted.append(order)
+
+
+def test_size_uses_the_breach_ticker_not_the_agent_ticker() -> None:
+    """A wrong ticker from the agent never redirects the order."""
+    strategy = OrderStrategy(held={"AAPL": 10.0})
+    decision = DrawdownDecision(ticker="APPL", action="exit", reason="typo", amount=None)
+
+    sells, buys = risk.size_drawdown_orders(strategy, [(_breach("AAPL"), decision)])
+
+    assert sells == [("AAPL", 10, "exit")]
+    assert buys == []
+
+
+def test_submit_reclamps_stale_sell_to_the_live_position() -> None:
+    """A book sized yesterday can never sell more than is held today."""
+    strategy = OrderStrategy(held={"AAPL": 4.0})
+    book = {"sells": [("AAPL", 10, "exit")], "buys": []}
+
+    assert risk.submit_drawdown_orders(strategy, book) is True
+    assert strategy.submitted == [("AAPL", 4, "sell")]
+
+
+def test_submit_skips_a_sell_whose_position_is_gone() -> None:
+    """No position left means no order, and the row is still drained."""
+    strategy = OrderStrategy(held={})
+    book = {"sells": [("AAPL", 10, "exit")], "buys": []}
+
+    risk.submit_drawdown_orders(strategy, book)
+
+    assert strategy.submitted == []
+    assert book == {"sells": [], "buys": []}
+
+
+def test_submit_drains_the_book_and_never_retries_a_failure() -> None:
+    """A rejected order is dropped, not left behind to resubmit tomorrow."""
+    strategy = OrderStrategy(held={"AAPL": 10.0, "MSFT": 8.0}, reject={"AAPL"})
+    book = {
+        "sells": [("AAPL", 10, "exit"), ("MSFT", 4, "trim 50%")],
+        "buys": [],
+    }
+
+    assert risk.submit_drawdown_orders(strategy, book) is True
+    assert strategy.submitted == [("MSFT", 4, "sell")]
+    assert book == {"sells": [], "buys": []}
+
+
+def test_submit_keeps_the_book_when_the_market_is_closed() -> None:
+    """Nothing is attempted, so every row survives for a later flush."""
+    strategy = OrderStrategy(held={"AAPL": 10.0}, market_open=False)
+    book = {"sells": [("AAPL", 10, "exit")], "buys": [("MSFT", 2, "add 25%")]}
+
+    assert risk.submit_drawdown_orders(strategy, book) is False
+    assert strategy.submitted == []
+    assert book == {"sells": [("AAPL", 10, "exit")], "buys": [("MSFT", 2, "add 25%")]}
+
+
+def test_submit_sends_sells_before_buys() -> None:
+    """Cash-raising sells must reach the broker ahead of any add."""
+    strategy = OrderStrategy(held={"AAPL": 10.0, "MSFT": 8.0})
+    book = {"sells": [("AAPL", 5, "trim 50%")], "buys": [("MSFT", 2, "add 25%")]}
+
+    risk.submit_drawdown_orders(strategy, book)
+
+    assert strategy.submitted == [("AAPL", 5, "sell"), ("MSFT", 2, "buy")]
+
+
+#     ================================
 # --> manage_drawdowns (orchestration)
 #     ================================
 
@@ -463,8 +563,16 @@ def _stub_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
         risk,
         "size_drawdown_orders",
         lambda _s, orders: (
-            [(breach[0], 1, decision.action) for breach, decision in orders if decision.action in {"trim", "exit"}],
-            [(breach[0], 1, decision.action) for breach, decision in orders if decision.action == "add"],
+            [
+                (breach[0], 1, decision.action)
+                for breach, decision in orders
+                if decision.action in {"trim", "exit"}
+            ],
+            [
+                (breach[0], 1, decision.action)
+                for breach, decision in orders
+                if decision.action == "add"
+            ],
         ),
     )
     monkeypatch.setattr(risk, "estimate_freed_capital", lambda _s, _sells: 0.0)
