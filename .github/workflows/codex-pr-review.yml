@@ -30,14 +30,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Prefetch base and head refs
+      - name: Prefetch base and head SHAs
         env:
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git fetch --no-tags origin \
-            "$PR_BASE_REF" \
-            "+refs/pull/$PR_NUMBER/head"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git fetch --no-tags origin "$PR_BASE_SHA" "$PR_HEAD_SHA"
+          git remote set-url origin "https://github.com/${{ github.repository }}.git"
 
       - name: Run Codex review
         id: codex
@@ -169,6 +170,7 @@ jobs:
 
     permissions:
       contents: read
+      issues: write
       pull-requests: write
 
     steps:
