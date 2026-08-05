@@ -114,13 +114,13 @@ class CsfChampions(Strategy):
 
         # None = nothing new to queue (no breaches, holds only, or zero-sized).
         # Existing pending rows (e.g. unflushed after a closed 10:00) stay put.
-        sized = manage_drawdowns(self, self.portfolio)
+        sized_drawdown_orders = manage_drawdowns(self, self.portfolio)
 
-        if sized is None:
+        if sized_drawdown_orders is None:
             log.info("After market closes: no new drawdown orders (pending book unchanged)")
             return
 
-        sells, buys = sized
+        sells, buys = sized_drawdown_orders
         self.pending_drawdown_orders["sells"] += sells
         self.pending_drawdown_orders["buys"] += buys
 

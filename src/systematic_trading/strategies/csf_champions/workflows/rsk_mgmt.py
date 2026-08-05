@@ -562,7 +562,7 @@ def manage_drawdowns(
         if decision.action in {"trim", "exit", "add"}  # Condition
     ]
 
-    # 3. Add the reviews the agent did to the dict in the portfolio class
+    # 3. Add the reviews the agent completed to the dict in the portfolio class
     # this is so that if the ticker is in a review window, it wont then be reviewed again the next day
     for breach, _decision in results:
         ticker, give_back, _pnl_pct, _avg_entry, as_of = breach
@@ -589,14 +589,14 @@ def manage_drawdowns(
         log.info("actionable decisions sized to zero whole shares — nothing to queue")
         return None
 
-    freed = estimate_freed_capital(strategy, sells)
+    freed_capital = estimate_freed_capital(strategy, sells)
 
     # TODO: inject the cptl reallocator agent here to reallocate the portfolio based on the risk manager's decisions
     # This will take the orders and then determine what it wants to do with the capital freed up from the sells
     # (`freed`) and may append buys. Then all sized orders go through submit_drawdown_orders.
     # The agent needs to append the sells and buys to the orders list
     # Agent outputs orders --> append to buys, sells and then submit the orders in the main loop
-    log.info("capital available for reallocation: $%.2f", freed)
+    log.info("capital available for reallocation: $%.2f", freed_capital)
 
     # 5. Return new rows only; strategy appends into its pending book.
     return sells, buys
