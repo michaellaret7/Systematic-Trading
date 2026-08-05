@@ -1,5 +1,13 @@
 name: Claude PR Review
 
+# Deliberately not `synchronize`. A review fires once, when the PR is ready to
+# be read; pushing fixes for that review does not fire another one. With
+# `synchronize` the reviewer re-read the whole base...head diff after every
+# push and, being an LLM asked to find problems, always found more — so
+# addressing a review produced a new review and the PR never converged.
+#
+# To ask for another pass after a substantial rewrite, add the `claude-review`
+# label. Remove and re-add it to run again.
 on:
   pull_request:
     branches:
@@ -7,8 +15,8 @@ on:
     types:
       - opened
       - reopened
-      - synchronize
       - ready_for_review
+      - labeled
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
@@ -17,7 +25,11 @@ concurrency:
 jobs:
   claude-review:
     name: Claude PR Review
-    if: github.event.pull_request.draft == false && vars.PR_REVIEWER == 'claude'
+    # The `labeled` trigger fires for every label, so gate it on ours.
+    if: >-
+      github.event.pull_request.draft == false
+      && vars.PR_REVIEWER == 'claude'
+      && (github.event.action != 'labeled' || github.event.label.name == 'claude-review')
     runs-on: ubuntu-latest
 
     permissions:
@@ -65,14 +77,19 @@ jobs:
             3. For every meaningful changed symbol, use Read / Grep / Glob to
                inspect surrounding code and search the repo for existing
                helpers before claiming something is new or missing.
-            4. Post findings as inline comments on the affected lines when
-               possible. Finish with one concise top-level PR comment.
+            4. If there are findings, post them as inline comments on the
+               affected lines. Always finish with one concise top-level PR
+               comment, whether or not there were findings.
 
             ## Primary focus: design and simplicity
 
             This is the main job. For every meaningful change, ask whether the
             same result could be achieved with less code, fewer concepts, or
             fewer moving parts, and challenge it when it could.
+
+            Asking the question of every change does not mean every change
+            fails it. Most well-written changes survive this scrutiny intact,
+            and reporting that is the correct outcome, not a lazy one.
 
             Flag:
             - Anything more complex than the problem requires (KISS): clever
@@ -116,16 +133,37 @@ jobs:
             - Refactors that trade one form of complexity for another
 
             Only report high-confidence, actionable findings. A short review
-            with three real simplifications is better than a long one padded
-            with observations.
+            carrying one real simplification is better than a long one padded
+            with observations, and a review carrying none is better still when
+            none exist.
 
-            Add inline comments on the affected lines when possible (pass
-            `confirmed: true` to the inline-comment tool). Finish with a
-            concise top-level summary that states whether the change is as
-            simple as it could be.
+            ## Approving cleanly
 
-            If there are no significant findings, explicitly say:
-            "No blocking issues found."
+            A pull request with nothing wrong with it is a normal and frequent
+            outcome, and the review that says so is a successful review. You
+            are not measured by how many findings you produce, and there is no
+            expected number. Never manufacture a finding, downgrade a
+            preference into a "concern", or raise something you would not
+            defend if challenged, in order to have written something.
+
+            Apply one test to every finding before you post it: would you ask
+            the author to change this if it cost them an hour and a rerun of
+            the test suite? If not, do not post it — not inline, not as a
+            passing remark in the summary, not as a "minor note" or "nit".
+
+            If nothing clears that bar, post no inline comments at all and make
+            the top-level comment exactly:
+
+            "Reviewed the full diff against CLAUDE.md. No changes needed."
+
+            Do not append caveats, observations, or things you "considered
+            flagging" to that sentence. An unqualified approval is the goal.
+
+            ## Otherwise
+
+            Add inline comments on the affected lines (pass `confirmed: true`
+            to the inline-comment tool). Finish with a concise top-level
+            summary of what you found.
 
           claude_args: |
             --model claude-opus-5
