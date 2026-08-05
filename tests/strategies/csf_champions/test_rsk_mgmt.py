@@ -66,6 +66,7 @@ class FakeStrategy:
         self._positions = positions or []
         self._as_of = as_of
         self._orders = orders or {}
+        self.pending_drawdown_orders = {"sells": [], "buys": []}
         self.broker = SimpleNamespace(
             api=SimpleNamespace(
                 get_all_positions=self._get_positions,
@@ -456,17 +457,23 @@ def test_estimate_freed_capital_empty_sells() -> None:
 #     ================================
 
 
-def _stub_sizing_and_submit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Skip broker sizing/submit in orchestration tests."""
-    monkeypatch.setattr(risk, "size_drawdown_orders", lambda _s, _o: ([], []))
+def _stub_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip broker sizing in orchestration tests; return a fixed book."""
+    monkeypatch.setattr(
+        risk,
+        "size_drawdown_orders",
+        lambda _s, orders: (
+            [(breach[0], 1, decision.action) for breach, decision in orders if decision.action in {"trim", "exit"}],
+            [(breach[0], 1, decision.action) for breach, decision in orders if decision.action == "add"],
+        ),
+    )
     monkeypatch.setattr(risk, "estimate_freed_capital", lambda _s, _sells: 0.0)
-    monkeypatch.setattr(risk, "submit_drawdown_orders", lambda _s, _sells, _buys: None)
 
 
-def test_manage_drawdowns_returns_actionable_orders_and_records_successes(
+def test_manage_drawdowns_returns_sized_rows_and_records_successes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Actionable decisions are returned; completed reviews start cooldown."""
+    """Returns new sells/buys only; does not mutate strategy pending; cooldowns set."""
     strategy = FakeStrategy(
         positions=[
             FakePosition("TRIM", unrealized_plpc=-0.30, avg_entry_price=50.0),
@@ -476,6 +483,8 @@ def test_manage_drawdowns_returns_actionable_orders_and_records_successes(
         ],
         as_of=date(2026, 7, 30),
     )
+    existing = {"sells": [("OLD", 2, "exit")], "buys": []}
+    strategy.pending_drawdown_orders = existing
     portfolio = Portfolio()
     agent = FakeAgent(
         action_by_ticker={
@@ -486,12 +495,16 @@ def test_manage_drawdowns_returns_actionable_orders_and_records_successes(
     )
     monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
     monkeypatch.setattr(risk, "MAX_WORKERS", 1)
-    _stub_sizing_and_submit(monkeypatch)
+    _stub_sizing(monkeypatch)
 
-    orders = risk.manage_drawdowns(strategy, portfolio)
+    sized = risk.manage_drawdowns(strategy, portfolio)
 
-    assert {breach[0] for breach, _ in orders} == {"TRIM", "EXIT"}
-    assert all(decision.action in {"trim", "exit", "add"} for _, decision in orders)
+    assert sized is not None
+    sells, buys = sized
+    assert {row[0] for row in sells} == {"TRIM", "EXIT"}
+    assert buys == []
+    # Strategy-owned book is untouched by manage.
+    assert strategy.pending_drawdown_orders == existing
     # All successful agent runs enter cooldown, including hold.
     assert set(portfolio.drawdown_reviews) == {"TRIM", "HOLD", "EXIT"}
     assert "OK" not in portfolio.drawdown_reviews
@@ -512,10 +525,38 @@ def test_manage_drawdowns_returns_empty_when_no_breaches(
 
     monkeypatch.setattr(risk, "build_risk_manager", boom)
 
-    orders = risk.manage_drawdowns(strategy, portfolio)
+    sized = risk.manage_drawdowns(strategy, portfolio)
 
-    assert orders == []
+    assert sized is None
+    assert strategy.pending_drawdown_orders == {"sells": [], "buys": []}
     assert portfolio.drawdown_reviews == {}
+
+
+def test_manage_drawdowns_hold_only_skips_sizing_and_preserves_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hold-only reviews still get cooldown; manage never mutates pending."""
+    strategy = FakeStrategy(
+        positions=[FakePosition("HOLD", unrealized_plpc=-0.30, avg_entry_price=50.0)],
+        as_of=date(2026, 7, 30),
+    )
+    existing = {"sells": [("OLD", 3, "exit")], "buys": []}
+    strategy.pending_drawdown_orders = existing
+    portfolio = Portfolio()
+    agent = FakeAgent(action="hold")
+    monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
+    monkeypatch.setattr(risk, "MAX_WORKERS", 1)
+
+    def boom_size(*_a, **_k):
+        raise AssertionError("should not size hold-only reviews")
+
+    monkeypatch.setattr(risk, "size_drawdown_orders", boom_size)
+
+    sized = risk.manage_drawdowns(strategy, portfolio)
+
+    assert sized is None
+    assert strategy.pending_drawdown_orders == existing
+    assert set(portfolio.drawdown_reviews) == {"HOLD"}
 
 
 def test_manage_drawdowns_does_not_record_failed_reviews(
@@ -533,11 +574,10 @@ def test_manage_drawdowns_does_not_record_failed_reviews(
     agent = FakeAgent(action="exit", fail_tickers={"BAD"})
     monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
     monkeypatch.setattr(risk, "MAX_WORKERS", 1)
-    _stub_sizing_and_submit(monkeypatch)
+    _stub_sizing(monkeypatch)
 
-    orders = risk.manage_drawdowns(strategy, portfolio)
+    sized = risk.manage_drawdowns(strategy, portfolio)
 
-    assert len(orders) == 1
-    assert orders[0][0][0] == "GOOD"
+    assert sized == ([("GOOD", 1, "exit")], [])
     assert set(portfolio.drawdown_reviews) == {"GOOD"}
     assert "BAD" not in portfolio.drawdown_reviews

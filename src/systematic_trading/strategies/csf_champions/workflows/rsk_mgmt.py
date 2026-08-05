@@ -43,11 +43,19 @@ QTY_TOLERANCE = 1e-6
 # One breach row: ticker, give-back %, unrealized pnl %, avg entry, calendar day.
 DrawdownBreach = tuple[str, float, float, float, date]
 
+# Sized order row: (ticker, whole-share qty, label).
+SizedOrder = tuple[str, int, str]
+
+# Pending risk book stashed on the strategy between AMC and the 10:00 cron.
+OrderBook = dict[str, list[SizedOrder]]
+
+def empty_order_book() -> OrderBook:
+    """Return an empty sell/buy pending order book."""
+    return {"sells": [], "buys": []}
 
 #     ================================
 # --> Helpers
 #     ================================
-
 
 def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
     """Round a share count to a non-negative whole number.
@@ -160,6 +168,7 @@ def check_for_drawdown_breaches(
     percentage, average entry price, and date of the breach.
     This will skip any tickers that have already been reviewed by the agent (still in cooldown dict in portfolio class).
     """
+
     api = strategy.broker.api
     positions = api.get_all_positions()
     as_of = strategy.get_datetime().date()
@@ -175,7 +184,7 @@ def check_for_drawdown_breaches(
         # Give-back from the high-water mark, with unrealized pnl kept as context
         give_back, pnl_pct = _position_drawdown(api, position, ticker)
 
-        # if the give-back is under the threshold, add it to the breaches list
+        # if the give-back breaks the threshold (-25% right now), add it to the breaches list to be reviewed by the agent
         if give_back < threshold_pct:
             avg_entry = float(position.avg_entry_price)
             breaches.append((ticker, give_back, pnl_pct, avg_entry, as_of))
@@ -245,7 +254,11 @@ def clear_expired_drawdown_reviews(
 def _deploy_single_drawdown_agent(
     breach: DrawdownBreach,
 ) -> tuple[DrawdownBreach, DrawdownDecision]:
-    """Run a fresh risk-manager agent on one breach."""
+    """
+    Run a fresh risk-manager agent on one breach. 
+    Return a tuple of the breach and the decision returned by the agent.
+    """
+
     # Unpack the breach tuple into its components
     ticker, give_back, pnl_pct, avg_entry, as_of = breach
 
@@ -430,16 +443,23 @@ def estimate_freed_capital(
 
 def submit_drawdown_orders(
     strategy: Strategy,
-    sells: list[tuple[str, int, str]],
-    buys: list[tuple[str, int, str]],
-) -> None:
-    """Submit pre-sized market sell then buy orders.
+    pending_drawdown_orders: OrderBook,
+) -> bool:
+    """Submit pre-sized market sell then buy orders from the pending book.
 
-    Sells go first so cash is free before any adds.
+    Sells go first so cash is free before any adds. Returns True when orders
+    were submitted; False when the market is closed so the caller can leave
+    the stash intact. Caller must skip empty books.
     """
-    if not sells and not buys:
-        log.info("no pending drawdown orders to submit")
-        return
+    sells = pending_drawdown_orders["sells"]
+    buys = pending_drawdown_orders["buys"]
+
+    # If the market is open, submit the orders, otherwise skip them
+    if not strategy.broker.is_market_open():
+        log.info("market is closed - leaving pending drawdown orders in place")
+        return False
+
+    log.info("market is open - submitting pending drawdown orders")
 
     for ticker, qty, label in sells:
         order = strategy.create_order(
@@ -469,6 +489,8 @@ def submit_drawdown_orders(
         len(buys),
     )
 
+    return True
+
 
 #     ================================
 # --> Main workflow
@@ -478,30 +500,34 @@ def submit_drawdown_orders(
 def manage_drawdowns(
     strategy: Strategy,
     portfolio: Portfolio,
-) -> list[tuple[DrawdownBreach, DrawdownDecision]]:
-    """Review drawdowns, record successes, and return actionable order instructions."""
+) -> tuple[list[SizedOrder], list[SizedOrder]] | None:
+    """Review drawdowns and return newly sized ``(sells, buys)``.
+
+    Does not mutate ``strategy.pending_drawdown_orders`` — the strategy owns
+    that book and appends. Returns ``None`` when there is nothing new to add
+    (no breaches, holds only, or everything sized to zero shares).
+    """
 
     # 1. check for drawdown breaches in the portfolio (broker api)
     breaches = check_for_drawdown_breaches(strategy, portfolio)
 
-    # if there are no breaches, return an empty list
     if not breaches:
-        return []
+        return None
 
-    # 2. run the agent on the freshly drawdown identified tickers
+    # 2. run the agent on the freshly identified tickers in a drawdown breach
     results = review_drawdowns(breaches)
 
-    # Create a list of tuples of the breaches and decisions that are trim, exit, or add
+    # Create a list of tuples of the breaches and decisions returned by the agent if they are trim, exit, or add
+    # The other option 'hold' does not submit an order so there is no need to include it in the list
     orders = [
-        (breach, decision) # Expression
-        for breach, decision in results # Loop 
-        if decision.action in {"trim", "exit", "add"} # Condition
+        (breach, decision)  # Expression
+        for breach, decision in results  # Loop
+        if decision.action in {"trim", "exit", "add"}  # Condition
     ]
 
     # 3. Add the reviews the agent did to the dict in the portfolio class
     # this is so that if the ticker is in a review window, it wont then be reviewed again the next day
     for breach, _decision in results:
-        # Unpack the tuple and only keep the ticker, give_back, and as_of date
         ticker, give_back, _pnl_pct, _avg_entry, as_of = breach
         portfolio.drawdown_reviews[ticker] = (ticker, give_back, as_of)
 
@@ -512,16 +538,28 @@ def manage_drawdowns(
             ", ".join(breach[0] for breach, _ in results),
         )
 
+    # Holds-only (or no successful actionable decisions): cooldown is recorded,
+    # but do not size or reallocate.
+    if not orders:
+        log.info("no actionable drawdown orders (hold-only or no successful actions)")
+        return None
+
     # 4. Size actionable decisions and estimate cash raised by sells.
     sells, buys = size_drawdown_orders(strategy, orders)
+
+    # Everything skipped at size (no position / zero whole shares) — nothing to append.
+    if not sells and not buys:
+        log.info("actionable decisions sized to zero whole shares — nothing to queue")
+        return None
+
     freed = estimate_freed_capital(strategy, sells)
 
     # TODO: inject the cptl reallocator agent here to reallocate the portfolio based on the risk manager's decisions
     # This will take the orders and then determine what it wants to do with the capital freed up from the sells
     # (`freed`) and may append buys. Then all sized orders go through submit_drawdown_orders.
+    # The agent needs to append the sells and buys to the orders list
+    # Agent outputs orders --> append to buys, sells and then submit the orders in the main loop
     log.info("capital available for reallocation: $%.2f", freed)
 
-    # 5. Submit the sized orders to the broker (sells before buys). dont do this yet
-    # submit_drawdown_orders(strategy, sells, buys)
-
-    return orders
+    # 5. Return new rows only; strategy appends into its pending book.
+    return sells, buys
