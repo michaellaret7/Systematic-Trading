@@ -75,9 +75,9 @@ BREADTH_PEAK_BARS = 252
 # Concurrent FMP fetches; one request covers one ETF's whole window.
 MAX_FETCH_WORKERS = 8
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _etf_closes(symbols: list[str], start: date) -> pd.DataFrame:
@@ -319,9 +319,9 @@ def _industry_rank(symbol: str, tags: dict, closes: pd.DataFrame) -> str:
     )
 
 
-#     ================================
+# ====================================
 # --> Tool
-#     ================================
+# ====================================
 
 
 @agent_tool(name="GetMarketContext", safe_parallel=True)

@@ -18,6 +18,12 @@ from lumibot.strategies import Strategy
 
 from systematic_trading.data.repository import load_daily_prices
 from systematic_trading.logging_setup import get_logger
+from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.agent import (
+    build_cptl_reallocator,
+)
+from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.models import (
+    ReallocationPlan,
+)
 from systematic_trading.strategies.csf_champions.agents.risk_manager.agent import (
     build_risk_manager,
 )
@@ -47,12 +53,12 @@ DrawdownBreach = tuple[str, float, float, float, date]
 SizedOrder = tuple[str, int, str]
 
 
-#     ================================
+# ====================================
 # --> Helpers
-#     ================================
+# ====================================
 
 
-def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
+def _whole_share_qty(raw: float, *, cap: int | None = None) -> int:
     """Round a share count to a non-negative whole number.
 
     Optional ``cap`` clamps the result (e.g. never sell more than held); a
@@ -66,7 +72,28 @@ def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
     return qty
 
 
-def signed_shares(strategy: Strategy, ticker: str) -> float:
+def _usable_price(strategy: Strategy, ticker: str) -> float | None:
+    """Last price for ``ticker``, or None when the feed reports no usable quote.
+
+    Alpaca can report missing quotes as 0.0 rather than None — treat both as
+    unusable so $0 never propagates into notionals or share counts.
+    """
+    last_price = strategy.get_last_price(ticker)
+
+    if last_price is None:
+        log.warning("%s: no last price", ticker)
+        return None
+
+    price = float(last_price)
+
+    if not math.isfinite(price) or price <= 0:
+        log.warning("%s: invalid last price %s", ticker, last_price)
+        return None
+
+    return price
+
+
+def _signed_shares(strategy: Strategy, ticker: str) -> float:
     """Shares currently held in ``ticker``, signed. Returns 0.0 when flat.
 
     Signed rather than absolute so a short position reads as negative and the
@@ -77,7 +104,7 @@ def signed_shares(strategy: Strategy, ticker: str) -> float:
     return float(position.quantity) if position is not None else 0.0
 
 
-def entry_date(api, symbol: str, position_qty: float) -> date | None:
+def _entry_date(api, symbol: str, position_qty: float) -> date | None:
     """Date the currently open position was opened, from Alpaca's fill history.
 
     Walks fills newest to oldest and returns the one where the running signed
@@ -110,7 +137,7 @@ def entry_date(api, symbol: str, position_qty: float) -> date | None:
     return None
 
 
-def give_back_pct(
+def _give_back_pct(
     symbol: str,
     opened_on: date,
     avg_entry: float,
@@ -140,13 +167,13 @@ def _position_drawdown(api, position, ticker: str) -> tuple[float, float]:
     pnl_pct = round(float(position.unrealized_plpc) * 100.0, 2)
 
     quantity = float(position.qty)
-    opened_on = entry_date(api, ticker, quantity)
+    opened_on = _entry_date(api, ticker, quantity)
 
     if opened_on is None:
         log.warning("%s: no flat point in fill history — falling back to unrealized pnl", ticker)
         return pnl_pct, pnl_pct
 
-    give_back = give_back_pct(
+    give_back = _give_back_pct(
         symbol=ticker,
         opened_on=opened_on,
         avg_entry=float(position.avg_entry_price),
@@ -157,9 +184,9 @@ def _position_drawdown(api, position, ticker: str) -> tuple[float, float]:
     return round(give_back, 2), pnl_pct
 
 
-#     ================================
+# ====================================
 # --> Drawdown detection
-#     ================================
+# ====================================
 
 
 def check_for_drawdown_breaches(
@@ -211,9 +238,9 @@ def check_for_drawdown_breaches(
     return breaches
 
 
-#     ================================
+# ====================================
 # --> Review cooldown
-#     ================================
+# ====================================
 
 
 def clear_expired_drawdown_reviews(
@@ -276,9 +303,9 @@ def release_drawdown_cooldowns(portfolio: Portfolio, tickers: list[str]) -> list
     return released
 
 
-#     ================================
+# ====================================
 # --> Agent review
-#     ================================
+# ====================================
 
 
 def _deploy_single_drawdown_agent(
@@ -346,9 +373,9 @@ def review_drawdowns(
     return results
 
 
-#     ================================
+# ====================================
 # --> Order sizing & capital
-#     ================================
+# ====================================
 
 
 def size_drawdown_orders(
@@ -377,7 +404,7 @@ def size_drawdown_orders(
                 decision.ticker,
             )
 
-        held = signed_shares(strategy, ticker)
+        held = _signed_shares(strategy, ticker)
 
         # Max whole shares we can sell without going short of a fractional remainder.
         held_whole = math.floor(held)
@@ -404,7 +431,7 @@ def size_drawdown_orders(
                 continue
 
             # Round allocation to whole shares; never sell more than held.
-            qty = whole_share_qty(held * decision.amount, cap=held_whole)
+            qty = _whole_share_qty(held * decision.amount, cap=held_whole)
 
             if qty <= 0:
                 log.warning("%s: trim sizes to zero whole shares — skipping", ticker)
@@ -424,7 +451,7 @@ def size_drawdown_orders(
                 continue
 
             # Round allocation to whole shares (same fraction-of-held sizing).
-            qty = whole_share_qty(held * decision.amount)
+            qty = _whole_share_qty(held * decision.amount)
 
             if qty <= 0:
                 log.warning("%s: add sizes to zero whole shares — skipping", ticker)
@@ -437,49 +464,95 @@ def size_drawdown_orders(
 
 def estimate_freed_capital(
     strategy: Strategy,
-    sells: list[SizedOrder],
+    rows: list[SizedOrder],
 ) -> float:
-    """Estimate cash raised by sized sell orders at last price.
+    """Estimate cash notional of sized orders at last price.
 
-    Sum of ``qty * last_price`` across trim/exit rows. Skips names with no
-    usable price. Returns dollars, rounded to cents.
+    Sum of ``qty * last_price`` across rows. Skips names with no usable price.
+    Used for sell proceeds and (with the same math) risk-add buy cost so the
+    reallocation budget can net the two. Returns dollars, rounded to cents.
     """
     total = 0.0
 
-    for ticker, qty, _label in sells:
+    for ticker, qty, _label in rows:
         if qty <= 0:
             continue
 
-        last_price = strategy.get_last_price(ticker)
+        price = _usable_price(strategy, ticker)
 
-        if last_price is None:
-            log.warning("%s: no last price — excluding from freed capital", ticker)
-            continue
-
-        price = float(last_price)
-
-        if not math.isfinite(price) or price <= 0:
-            log.warning(
-                "%s: invalid last price %s — excluding from freed capital", ticker, last_price
-            )
+        if price is None:
             continue
 
         total += qty * price
 
-    freed = round(total, 2)
+    notional = round(total, 2)
 
     log.info(
-        "estimated capital freed by %d sell(s): $%.2f",
-        len(sells),
-        freed,
+        "estimated order notional for %d row(s): $%.2f",
+        len(rows),
+        notional,
     )
 
-    return freed
+    return notional
 
 
-#     ================================
+def size_reallocation_picks(
+    strategy: Strategy,
+    plan: ReallocationPlan,
+    freed_capital: float,
+) -> list[SizedOrder]:
+    """Turn reallocator picks into whole-share buys within ``freed_capital``.
+
+    Same role as ``size_drawdown_orders`` for risk decisions: agent outputs
+    weights, this converts to ``(ticker, qty, label)`` rows.
+    """
+    buys: list[SizedOrder] = []
+    remaining = max(0.0, freed_capital)
+    account_value = float(strategy.portfolio_value)
+
+    if remaining <= 0 or account_value <= 0 or not plan.picks:
+        return buys
+
+    for pick in plan.picks:
+        ticker = pick.ticker.strip().upper()
+        weight = float(pick.weight_pct)
+
+        if not ticker or not (0.5 <= weight <= 3.0):
+            log.warning("%s: invalid reallocation pick (weight %.2f) — skipping", ticker, weight)
+            continue
+
+        price = _usable_price(strategy, ticker)
+
+        if price is None:
+            continue
+
+        # Floor so share count never spends past residual free cash.
+        target_dollars = min(weight / 100.0 * account_value, remaining)
+        qty = max(0, math.floor(target_dollars / price))
+
+        if qty <= 0:
+            log.warning("%s: reallocation sizes to zero whole shares — skipping", ticker)
+            continue
+
+        cost = qty * price
+        remaining = max(0.0, remaining - cost)
+        buys.append((ticker, qty, f"realloc {weight:.1f}%"))
+
+        log.info(
+            "%s: reallocation buy %d shares (%.1f%%, ~$%.2f); $%.2f left",
+            ticker,
+            qty,
+            weight,
+            cost,
+            remaining,
+        )
+
+    return buys
+
+
+# ====================================
 # --> Order submission
-#     ================================
+# ====================================
 
 
 def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> tuple[int, list[str]]:
@@ -499,7 +572,7 @@ def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> tuple
         # The position may have shrunk since sizing; selling more than we hold
         # would open a short in a long-only sleeve.
         if side == "sell":
-            qty = whole_share_qty(qty, cap=math.floor(signed_shares(strategy, ticker)))
+            qty = _whole_share_qty(qty, cap=math.floor(_signed_shares(strategy, ticker)))
 
             if qty <= 0:
                 log.warning("%s: position gone since sizing — skipping %s", ticker, label)
@@ -560,9 +633,9 @@ def submit_drawdown_orders(
     return True
 
 
-#     ================================
+# ====================================
 # --> Main workflow
-#     ================================
+# ====================================
 
 
 def manage_drawdowns(
@@ -622,12 +695,33 @@ def manage_drawdowns(
 
     freed_capital = estimate_freed_capital(strategy, sells)
 
-    # TODO: inject the cptl reallocator agent here to reallocate the portfolio based on the risk manager's decisions
-    # This will take the orders and then determine what it wants to do with the capital freed up from the sells
-    # (`freed`) and may append buys. Then all sized orders go through submit_drawdown_orders.
-    # The agent needs to append the sells and buys to the orders list
-    # Agent outputs orders --> append to buys, sells and then submit the orders in the main loop
-    log.info("capital available for reallocation: $%.2f", freed_capital)
+    # Risk `add` buys are funded from the same proceeds — not available to redeploy.
+    reallocation_budget = max(0.0, freed_capital - estimate_freed_capital(strategy, buys))
+    log.info("capital available for reallocation: $%.2f", reallocation_budget)
 
-    # 5. Return new rows only; strategy appends into its pending book.
+    # 5. Run the capital reallocator when residual free cash remains; size its
+    # picks into buys and append. submit_drawdown_orders still sells before buys.
+    if reallocation_budget > 0:
+        sell_summary = ", ".join(f"{t} {label} x{qty}" for t, qty, label in sells) or "none"
+        task = (
+            f"Freed capital available to redeploy: ${reallocation_budget:,.2f}. "
+            f"Account value: ${float(strategy.portfolio_value):,.2f}. "
+            f"Tonight's sells (do not re-enter): {sell_summary}. "
+            f"Redeploy up to the freed capital toward the ~60% sleeve target. "
+            f"Return a ReallocationPlan (picks may be empty)."
+        )
+
+        try:
+            plan = build_cptl_reallocator(strategy).run(task, sink=LogSink("cptl_realloc"))
+
+            if not isinstance(plan, ReallocationPlan):
+                raise TypeError(
+                    f"capital reallocator must return ReallocationPlan, got {type(plan).__name__}"
+                )
+
+            buys.extend(size_reallocation_picks(strategy, plan, reallocation_budget))
+        except Exception:
+            log.exception("capital reallocator failed — continuing with risk orders only")
+
+    # 6. Return new rows only; strategy appends into its pending book.
     return sells, buys

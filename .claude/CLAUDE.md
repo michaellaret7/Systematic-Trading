@@ -257,9 +257,9 @@ def process_items(items: list[str], lookup: dict):
 - Helper functions live at the **top** of the file under a banner block:
 
   ```
-      ================================
-  --> Helper funcs
-      ================================
+  # ====================================
+  # --> Helper funcs
+  # ====================================
   ```
 
 ### Complexity Gauging

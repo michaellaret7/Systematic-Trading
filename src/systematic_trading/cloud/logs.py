@@ -61,9 +61,9 @@ class LogEntry(NamedTuple):
     message: str
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _parse_first_line(line: str) -> LogEntry:
@@ -122,9 +122,9 @@ def _recent_stream(group: str, stream_prefix: str | None) -> str | None:
     return streams[0]["logStreamName"] if streams else None
 
 
-#     ================================
+# ====================================
 # --> Parsing
-#     ================================
+# ====================================
 
 
 def parse_records(lines: Iterable[str]) -> Iterator[LogEntry]:
@@ -158,9 +158,9 @@ def parse_records(lines: Iterable[str]) -> Iterator[LogEntry]:
         yield current
 
 
-#     ================================
+# ====================================
 # --> S3 source (complete pod history)
-#     ================================
+# ====================================
 
 
 def s3_log_lines(key: str, bucket: str | None = None) -> Iterator[str]:
@@ -187,9 +187,9 @@ def read_s3_log(
     return _filtered(parse_records(s3_log_lines(key, bucket)), level)
 
 
-#     ================================
+# ====================================
 # --> CloudWatch source (windowed / live)
-#     ================================
+# ====================================
 
 
 def cloudwatch_log_lines(

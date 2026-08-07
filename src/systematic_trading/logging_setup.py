@@ -60,9 +60,9 @@ _configured = False
 _cloudwatch_attached = False
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _source(name: str) -> str:
@@ -267,9 +267,9 @@ def _attach_cloudwatch() -> None:
     _cloudwatch_attached = True
 
 
-#     ================================
+# ====================================
 # --> Public API
-#     ================================
+# ====================================
 
 
 def configure_logging(level: int = logging.INFO) -> logging.Logger:

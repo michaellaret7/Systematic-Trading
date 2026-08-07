@@ -15,9 +15,9 @@ from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 from systematic_trading.strategies.csf_champions.workflows import rsk_mgmt as risk
 
 
-#     ================================
+# ====================================
 # --> Fakes
-#     ================================
+# ====================================
 
 
 class FakePosition:
@@ -152,9 +152,9 @@ def flat_price_history(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-#     ================================
+# ====================================
 # --> check_for_drawdown_breaches
-#     ================================
+# ====================================
 
 
 def test_check_for_drawdown_breaches_flags_only_under_threshold() -> None:
@@ -292,7 +292,7 @@ def test_entry_date_reads_the_real_alpaca_side_enum() -> None:
     ]
     api = SimpleNamespace(get_orders=lambda filter: orders)
 
-    assert risk.entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
+    assert risk._entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
 
 
 def test_entry_date_uses_most_recent_flat_point() -> None:
@@ -304,7 +304,7 @@ def test_entry_date_uses_most_recent_flat_point() -> None:
     ]
     api = SimpleNamespace(get_orders=lambda filter: orders)
 
-    assert risk.entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
+    assert risk._entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
 
 
 def test_breach_falls_back_to_pnl_when_entry_unresolved() -> None:
@@ -320,9 +320,9 @@ def test_breach_falls_back_to_pnl_when_entry_unresolved() -> None:
     assert breaches[0][2] == -30.0
 
 
-#     ================================
+# ====================================
 # --> clear_expired_drawdown_reviews
-#     ================================
+# ====================================
 
 
 def test_clear_expired_drawdown_reviews_removes_only_stale() -> None:
@@ -356,9 +356,9 @@ def test_clear_expired_drawdown_reviews_noop_when_all_fresh() -> None:
     assert "AAPL" in portfolio.drawdown_reviews
 
 
-#     ================================
+# ====================================
 # --> review_drawdowns
-#     ================================
+# ====================================
 
 
 def test_review_drawdowns_returns_decision_per_success(
@@ -411,9 +411,9 @@ def test_review_drawdowns_empty_input_short_circuits(
     assert called is False
 
 
-#     ================================
+# ====================================
 # --> estimate_freed_capital
-#     ================================
+# ====================================
 
 
 def test_estimate_freed_capital_sums_sells_at_last_price() -> None:
@@ -453,9 +453,9 @@ def test_estimate_freed_capital_empty_sells() -> None:
     assert risk.estimate_freed_capital(strategy, []) == 0.0
 
 
-#     ================================
+# ====================================
 # --> size_drawdown_orders & submission
-#     ================================
+# ====================================
 
 
 class OrderStrategy:
@@ -601,9 +601,9 @@ def test_submit_sends_sells_before_buys() -> None:
     assert strategy.submitted == [("AAPL", 5, "sell"), ("MSFT", 2, "buy")]
 
 
-#     ================================
+# ====================================
 # --> manage_drawdowns (orchestration)
-#     ================================
+# ====================================
 
 
 def _stub_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -731,3 +731,153 @@ def test_manage_drawdowns_does_not_record_failed_reviews(
     assert sized == ([("GOOD", 1, "exit")], [])
     assert set(portfolio.drawdown_reviews) == {"GOOD"}
     assert "BAD" not in portfolio.drawdown_reviews
+
+
+# ====================================
+# --> Capital reallocation
+# ====================================
+
+
+def test_size_reallocation_picks_clamps_to_freed_capital() -> None:
+    """Picks size to whole shares and never spend past freed capital."""
+    from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.models import (
+        ReallocationPick,
+        ReallocationPlan,
+    )
+
+    strategy = SimpleNamespace(
+        portfolio_value=100_000.0,
+        get_last_price=lambda ticker: {"XOM": 100.0}[ticker],
+    )
+    plan = ReallocationPlan(
+        picks=[ReallocationPick(ticker="XOM", weight_pct=2.0, reason="diversify energy")]
+    )
+
+    # 2% of 100k = $2000, but only $150 free → floor(150/100) = 1 share.
+    buys = risk.size_reallocation_picks(strategy, plan, freed_capital=150.0)
+
+    assert buys == [("XOM", 1, "realloc 2.0%")]
+
+
+def test_manage_drawdowns_appends_reallocation_buys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Residual free cash runs the reallocator; sized picks append to buys."""
+    from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.models import (
+        ReallocationPick,
+        ReallocationPlan,
+    )
+
+    strategy = FakeStrategy(
+        positions=[FakePosition("EXIT", unrealized_plpc=-0.40, avg_entry_price=70.0)],
+        as_of=date(2026, 7, 30),
+    )
+    strategy.portfolio_value = 100_000.0
+    portfolio = Portfolio()
+    agent = FakeAgent(action="exit")
+    monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
+    monkeypatch.setattr(risk, "MAX_WORKERS", 1)
+    monkeypatch.setattr(
+        risk,
+        "size_drawdown_orders",
+        lambda _s, _orders: ([("EXIT", 10, "exit")], []),
+    )
+    # Empty risk-buy list → 0 notional so budget equals sell proceeds.
+    monkeypatch.setattr(
+        risk,
+        "estimate_freed_capital",
+        lambda _s, rows: 5_000.0 if rows else 0.0,
+    )
+
+    seen_budget: list[float] = []
+
+    class ReallocAgent:
+        def run(self, task: str, sink: Any) -> ReallocationPlan:
+            return ReallocationPlan(
+                picks=[ReallocationPick(ticker="XOM", weight_pct=1.0, reason="fit")]
+            )
+
+    monkeypatch.setattr(risk, "build_cptl_reallocator", lambda _s: ReallocAgent())
+
+    def _size(_s, _plan, budget: float):
+        seen_budget.append(budget)
+        return [("XOM", 20, "realloc 1.0%")]
+
+    monkeypatch.setattr(risk, "size_reallocation_picks", _size)
+
+    sells, buys = risk.manage_drawdowns(strategy, portfolio)
+
+    assert sells == [("EXIT", 10, "exit")]
+    assert buys == [("XOM", 20, "realloc 1.0%")]
+    assert seen_budget == [5_000.0]
+
+
+def test_manage_drawdowns_nets_risk_adds_out_of_reallocation_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Risk add buys reduce the reallocator budget so cash is not double-spent."""
+    from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.models import (
+        ReallocationPick,
+        ReallocationPlan,
+    )
+
+    strategy = FakeStrategy(
+        positions=[
+            FakePosition("TRIM", unrealized_plpc=-0.30, avg_entry_price=50.0),
+            FakePosition("ADD", unrealized_plpc=-0.35, avg_entry_price=60.0),
+        ],
+        as_of=date(2026, 7, 30),
+    )
+    strategy.portfolio_value = 100_000.0
+    portfolio = Portfolio()
+    agent = FakeAgent(
+        action_by_ticker={
+            "TRIM": ("trim", 0.5),
+            "ADD": ("add", 0.25),
+        }
+    )
+    monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
+    monkeypatch.setattr(risk, "MAX_WORKERS", 1)
+    monkeypatch.setattr(
+        risk,
+        "size_drawdown_orders",
+        lambda _s, _orders: (
+            [("TRIM", 10, "trim 50%")],
+            [("ADD", 5, "add 25%")],
+        ),
+    )
+
+    def _notional(_s, rows: list) -> float:
+        if not rows:
+            return 0.0
+        # Sell proceeds $3k; risk-add cost $2k → reallocator budget $1k.
+        if rows[0][0] == "TRIM":
+            return 3_000.0
+        return 2_000.0
+
+    monkeypatch.setattr(risk, "estimate_freed_capital", _notional)
+
+    seen_budget: list[float] = []
+    seen_task: list[str] = []
+
+    class ReallocAgent:
+        def run(self, task: str, sink: Any) -> ReallocationPlan:
+            seen_task.append(task)
+            return ReallocationPlan(
+                picks=[ReallocationPick(ticker="XOM", weight_pct=1.0, reason="fit")]
+            )
+
+    monkeypatch.setattr(risk, "build_cptl_reallocator", lambda _s: ReallocAgent())
+
+    def _size(_s, _plan, budget: float):
+        seen_budget.append(budget)
+        return [("XOM", 10, "realloc 1.0%")]
+
+    monkeypatch.setattr(risk, "size_reallocation_picks", _size)
+
+    sells, buys = risk.manage_drawdowns(strategy, portfolio)
+
+    assert sells == [("TRIM", 10, "trim 50%")]
+    assert buys == [("ADD", 5, "add 25%"), ("XOM", 10, "realloc 1.0%")]
+    assert seen_budget == [1_000.0]
+    assert "$1,000.00" in seen_task[0]

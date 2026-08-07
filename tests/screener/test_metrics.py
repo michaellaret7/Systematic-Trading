@@ -12,9 +12,9 @@ import pytest
 
 from systematic_trading.screener.fundamentals.metrics import compute_metrics
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 BASE_ROW = {
     "revenue": 100.0,
@@ -86,9 +86,9 @@ def last_row(panel: pd.DataFrame, symbol: str) -> pd.Series:
     return panel[panel["symbol"] == symbol].iloc[-1]
 
 
-#     ================================
+# ====================================
 # --> Tests
-#     ================================
+# ====================================
 
 
 def test_ttm_needs_four_quarters():

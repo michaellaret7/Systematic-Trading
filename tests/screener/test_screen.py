@@ -17,9 +17,9 @@ from systematic_trading.screener.fundamentals.screen import (
     sector_relative,
 )
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def make_panel() -> pd.DataFrame:
@@ -49,9 +49,9 @@ def make_panel() -> pd.DataFrame:
 CUTOFF = pd.Timestamp("2026-06-01")
 
 
-#     ================================
+# ====================================
 # --> Tests
-#     ================================
+# ====================================
 
 
 def test_cross_section_is_point_in_time():

@@ -61,9 +61,9 @@ _MIN_BARS: dict[str, int] = {
 }
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _start_for_sessions(sessions: int) -> date:
@@ -154,9 +154,9 @@ def _resolve_groups(technicals: list[str] | None) -> tuple[str, ...] | str:
     return tuple(ordered)
 
 
-#     ================================
+# ====================================
 # --> Tools
-#     ================================
+# ====================================
 
 
 @agent_tool(name="GetPrices", safe_parallel=True)

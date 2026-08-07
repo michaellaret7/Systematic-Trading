@@ -20,9 +20,9 @@ from agent_harness.decorator import Param, agent_tool
 from systematic_trading.data.repository import load_daily_prices, load_ideas, submit_idea
 from systematic_trading.domain.ideas import TradeIdea
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _latest_close(symbol: str) -> float | None:
@@ -51,9 +51,9 @@ def _idea_payload(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-#     ================================
+# ====================================
 # --> Tools
-#     ================================
+# ====================================
 
 
 @agent_tool(name="SubmitTradeIdea")

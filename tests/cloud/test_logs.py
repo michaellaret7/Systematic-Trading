@@ -11,9 +11,9 @@ around this parser.
 from systematic_trading.cloud.logs import LogEntry, parse_records
 from systematic_trading.cloud.logs import _filtered  # noqa: PLC2701 — testing the filter directly
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 # A realistic slice: an ERROR record carries a two-line traceback continuation, and
 # one INFO message contains an embedded " | " pipe to prove the split is bounded.
@@ -28,9 +28,9 @@ SAMPLE = [
 ]
 
 
-#     ================================
+# ====================================
 # --> Tests
-#     ================================
+# ====================================
 
 
 def test_parse_groups_continuations_and_drops_pre_log_noise():
