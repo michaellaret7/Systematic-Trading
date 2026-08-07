@@ -95,6 +95,66 @@ NO_AUTO_UPGRADE_SNIPPET = """
 systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades 2>/dev/null || true
 """
 
+# Strategy droplets only. The agent code sandbox needs a Docker daemon, and a
+# droplet is a real VM so it can host one. This has no RunPod equivalent: pods
+# are already containers and SECURE cloud denies privileged mode, so the sandbox
+# exists on the DigitalOcean path alone.
+#
+# `docker.io` from Ubuntu's archive rather than Docker's convenience script,
+# which adds a third-party apt source for an engine we have no need of — the
+# sandbox uses `docker run` with resource flags and nothing version-sensitive.
+DOCKER_SNIPPET = """
+apt-get install -y -qq docker.io
+systemctl enable --now docker
+echo "docker=$(docker --version 2>/dev/null || echo MISSING)"
+"""
+
+# Where the sandbox snapshot lands. Must match the default in
+# ``config.sandbox_data_dir``, which is what the tool reads.
+SANDBOX_DATA_DIR = "/root/sandbox-data"
+
+
+# ====================================
+# --> Agent code sandbox
+# ====================================
+
+
+def sandbox_snippet() -> str:
+    """Build the sandbox image and stage the read-only data snapshot it mounts.
+
+    Runs after the checkout: the Dockerfile lives in the repo, and the snapshot
+    needs the S3 credentials ``env_snippet`` exported.
+
+    The snapshot exists so the sandbox can run with ``--network none`` — the
+    agent's code reads parquet already on disk instead of holding S3
+    credentials. It is refreshed daily because a strategy droplet lives for
+    weeks while ``push_daily_prices`` and ``push_fundamentals`` rewrite these
+    objects, and research against month-old bars is worse than no research.
+
+    ``aws``, not ``uv run``: same reason as ``APT_SNIPPET``. The refresh must
+    keep working when the project venv does not.
+    """
+    return f"""
+docker build -q -t sandbox /root/repo/src/systematic_trading/agents/shared_tools/sandbox
+echo "=== sandbox image build rc=$? ==="
+
+# Flattened into one directory (see sandbox/sync.py SNAPSHOT, the authority on
+# this layout) so the agent's code never reasons about repository prefixes.
+# `sync` for the statements so a daily refresh re-pulls only what changed;
+# universe.csv is excluded because the sandbox has no use for it.
+stage_sandbox_data() {{
+    mkdir -p {SANDBOX_DATA_DIR}
+    aws s3 cp "s3://$S3_BUCKET/prices/daily_ohclv.parquet" {SANDBOX_DATA_DIR}/prices.parquet --only-show-errors
+    aws s3 cp "s3://$S3_BUCKET/screeners/fundamentals_panel.parquet" {SANDBOX_DATA_DIR}/fundamentals_panel.parquet --only-show-errors
+    aws s3 sync "s3://$S3_BUCKET/fundamentals/" {SANDBOX_DATA_DIR}/ --exclude "*" --include "*.parquet" --only-show-errors
+    echo "sandbox snapshot: $(du -sh {SANDBOX_DATA_DIR} | cut -f1) across $(ls {SANDBOX_DATA_DIR} | wc -l) files"
+}}
+
+stage_sandbox_data
+
+( while true; do sleep 86400; stage_sandbox_data; done ) &
+"""
+
 
 # ====================================
 # --> Helper funcs
@@ -206,13 +266,18 @@ def strategy_user_data(job_name: str, strategy_name: str, branch: str) -> str:
 
     Automatic upgrades are disabled first (see ``NO_AUTO_UPGRADE_SNIPPET``) so
     nothing outside this script can bounce the unit.
+
+    Docker and the agent code sandbox are set up here too — the strategy's
+    research agent runs its analysis inside a container on this droplet.
     """
     return f"""#!/bin/bash
 {CAPTURE_SNIPPET}
 {APT_SNIPPET}
 {NO_AUTO_UPGRADE_SNIPPET}
+{DOCKER_SNIPPET}
 {env_snippet()}
 {bootstrap_snippet(branch)}
+{sandbox_snippet()}
 {log_sync_snippet(job_name)}
 {hourly_et_upload_snippet()}
 

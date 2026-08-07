@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -74,6 +75,15 @@ def s3_bucket() -> str:
     ``load_dotenv`` has run — only the bucket name needs an accessor.
     """
     return _require("S3_BUCKET")
+
+
+def sandbox_data_dir() -> Path:
+    """Directory holding the read-only data snapshot the code sandbox mounts.
+
+    Defaults to the path the strategy droplet's bootstrap syncs into; local runs
+    override it with ``SANDBOX_DATA_DIR`` to point at their own synced copy.
+    """
+    return Path(os.getenv("SANDBOX_DATA_DIR", "/root/sandbox-data"))
 
 
 def cloudwatch_config() -> dict[str, str] | None:
