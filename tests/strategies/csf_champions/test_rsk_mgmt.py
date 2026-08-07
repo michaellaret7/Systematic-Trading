@@ -731,3 +731,73 @@ def test_manage_drawdowns_does_not_record_failed_reviews(
     assert sized == ([("GOOD", 1, "exit")], [])
     assert set(portfolio.drawdown_reviews) == {"GOOD"}
     assert "BAD" not in portfolio.drawdown_reviews
+
+
+# ====================================
+# --> Capital reallocation
+# ====================================
+
+
+def test_size_reallocation_picks_clamps_to_freed_capital() -> None:
+    """Picks size to whole shares and never spend past freed capital."""
+    from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.models import (
+        ReallocationPick,
+        ReallocationPlan,
+    )
+
+    strategy = SimpleNamespace(
+        portfolio_value=100_000.0,
+        get_last_price=lambda ticker: {"XOM": 100.0}[ticker],
+    )
+    plan = ReallocationPlan(
+        picks=[ReallocationPick(ticker="XOM", weight_pct=2.0, reason="diversify energy")]
+    )
+
+    # 2% of 100k = $2000, but only $150 free → floor(150/100) = 1 share.
+    buys = risk.size_reallocation_picks(strategy, plan, freed_capital=150.0)
+
+    assert buys == [("XOM", 1, "realloc 2.0%")]
+
+
+def test_manage_drawdowns_appends_reallocation_buys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Freed capital runs the reallocator; sized picks append to buys."""
+    from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.models import (
+        ReallocationPick,
+        ReallocationPlan,
+    )
+
+    strategy = FakeStrategy(
+        positions=[FakePosition("EXIT", unrealized_plpc=-0.40, avg_entry_price=70.0)],
+        as_of=date(2026, 7, 30),
+    )
+    strategy.portfolio_value = 100_000.0
+    portfolio = Portfolio()
+    agent = FakeAgent(action="exit")
+    monkeypatch.setattr(risk, "build_risk_manager", lambda: agent)
+    monkeypatch.setattr(risk, "MAX_WORKERS", 1)
+    monkeypatch.setattr(
+        risk,
+        "size_drawdown_orders",
+        lambda _s, _orders: ([("EXIT", 10, "exit")], []),
+    )
+    monkeypatch.setattr(risk, "estimate_freed_capital", lambda _s, _sells: 5_000.0)
+
+    class ReallocAgent:
+        def run(self, task: str, sink: Any) -> ReallocationPlan:
+            return ReallocationPlan(
+                picks=[ReallocationPick(ticker="XOM", weight_pct=1.0, reason="fit")]
+            )
+
+    monkeypatch.setattr(risk, "build_cptl_reallocator", lambda _s: ReallocAgent())
+    monkeypatch.setattr(
+        risk,
+        "size_reallocation_picks",
+        lambda _s, _plan, _freed: [("XOM", 20, "realloc 1.0%")],
+    )
+
+    sells, buys = risk.manage_drawdowns(strategy, portfolio)
+
+    assert sells == [("EXIT", 10, "exit")]
+    assert buys == [("XOM", 20, "realloc 1.0%")]

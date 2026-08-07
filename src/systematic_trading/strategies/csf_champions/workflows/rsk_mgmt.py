@@ -18,6 +18,12 @@ from lumibot.strategies import Strategy
 
 from systematic_trading.data.repository import load_daily_prices
 from systematic_trading.logging_setup import get_logger
+from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.agent import (
+    build_cptl_reallocator,
+)
+from systematic_trading.strategies.csf_champions.agents.cptl_reallocator.models import (
+    ReallocationPlan,
+)
 from systematic_trading.strategies.csf_champions.agents.risk_manager.agent import (
     build_risk_manager,
 )
@@ -477,6 +483,73 @@ def estimate_freed_capital(
     return freed
 
 
+def size_reallocation_picks(
+    strategy: Strategy,
+    plan: ReallocationPlan,
+    freed_capital: float,
+) -> list[SizedOrder]:
+    """Turn reallocator picks into whole-share buys within ``freed_capital``.
+
+    Same role as ``size_drawdown_orders`` for risk decisions: agent outputs
+    weights, this converts to ``(ticker, qty, label)`` rows.
+    """
+
+    buys: list[SizedOrder] = []
+    remaining = max(0.0, freed_capital)
+    account_value = float(strategy.portfolio_value)
+
+    if remaining <= 0 or account_value <= 0 or not plan.picks:
+        return buys
+
+    # Iterate through the picks from the plan
+    for pick in plan.picks:
+        ticker = pick.ticker.strip().upper()
+        weight = float(pick.weight_pct)
+
+        if not ticker or not (0.5 <= weight <= 3.0):
+            log.warning("%s: invalid reallocation pick (weight %.2f) — skipping", ticker, weight)
+            continue
+
+        last_price = strategy.get_last_price(ticker)
+
+        if last_price is None:
+            log.warning("%s: no last price — skipping reallocation pick", ticker)
+            continue
+
+        price = float(last_price)
+
+        if not math.isfinite(price) or price <= 0:
+            log.warning(
+                "%s: invalid last price %s — skipping reallocation pick", ticker, last_price
+            )
+            continue
+
+        # Floor so share count never spends past residual free cash.
+        target_dollars = min(weight / 100.0 * account_value, remaining)
+        qty = max(0, math.floor(target_dollars / price))
+
+        if qty <= 0:
+            log.warning("%s: reallocation sizes to zero whole shares — skipping", ticker)
+            continue
+
+        cost = qty * price
+        remaining = max(0.0, remaining - cost)
+
+        # Append the ticker, quantity, and label to the buys list
+        buys.append((ticker, qty, f"realloc {weight:.1f}%"))
+
+        log.info(
+            "%s: reallocation buy %d shares (%.1f%%, ~$%.2f); $%.2f left",
+            ticker,
+            qty,
+            weight,
+            cost,
+            remaining,
+        )
+
+    return buys
+
+
 # ====================================
 # --> Order submission
 # ====================================
@@ -621,13 +694,33 @@ def manage_drawdowns(
         return [], []
 
     freed_capital = estimate_freed_capital(strategy, sells)
-
-    # TODO: run cptl reallocator when freed_capital is deployable.
-    # Agent returns structured pick(s) (ticker + weight_pct) — no submit tool.
-    # Size those into whole-share buys against freed_capital / account value,
-    # append to `buys`, then the strategy pending book + submit_drawdown_orders
-    # flush handles sells-before-buys as usual.
     log.info("capital available for reallocation: $%.2f", freed_capital)
 
-    # 5. Return new rows only; strategy appends into its pending book.
+    # 5. Run the capital reallocator when sells freed cash; size its picks into
+    # buys and append. submit_drawdown_orders still runs sells before all buys.
+    if freed_capital > 0:
+        sell_summary = ", ".join(f"{t} {label} x{qty}" for t, qty, label in sells) or "none"
+        task = (
+            f"Freed capital available to redeploy: ${freed_capital:,.2f}. "
+            f"Account value: ${float(strategy.portfolio_value):,.2f}. "
+            f"Tonight's sells (do not re-enter): {sell_summary}. "
+            f"Redeploy up to the freed capital toward the ~60% sleeve target. "
+            f"Return a ReallocationPlan (picks may be empty)."
+        )
+
+        try:
+            plan = build_cptl_reallocator(strategy).run(task, sink=LogSink("cptl_realloc"))
+        except Exception:
+            log.exception("capital reallocator failed — continuing with risk orders only")
+            plan = None
+
+        if isinstance(plan, ReallocationPlan) and plan.picks:
+            buys.extend(size_reallocation_picks(strategy, plan, freed_capital))
+        elif plan is not None and not isinstance(plan, ReallocationPlan):
+            log.error(
+                "capital reallocator returned %s, expected ReallocationPlan — ignoring",
+                type(plan).__name__,
+            )
+
+    # 6. Return new rows only; strategy appends into its pending book.
     return sells, buys
