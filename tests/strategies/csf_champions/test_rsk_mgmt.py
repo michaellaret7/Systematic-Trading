@@ -292,7 +292,7 @@ def test_entry_date_reads_the_real_alpaca_side_enum() -> None:
     ]
     api = SimpleNamespace(get_orders=lambda filter: orders)
 
-    assert risk.entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
+    assert risk._entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
 
 
 def test_entry_date_uses_most_recent_flat_point() -> None:
@@ -304,7 +304,7 @@ def test_entry_date_uses_most_recent_flat_point() -> None:
     ]
     api = SimpleNamespace(get_orders=lambda filter: orders)
 
-    assert risk.entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
+    assert risk._entry_date(api, "AAPL", 10.0) == date(2026, 6, 1)
 
 
 def test_breach_falls_back_to_pnl_when_entry_unresolved() -> None:

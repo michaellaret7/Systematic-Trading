@@ -52,7 +52,7 @@ SizedOrder = tuple[str, int, str]
 #     ================================
 
 
-def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
+def _whole_share_qty(raw: float, *, cap: int | None = None) -> int:
     """Round a share count to a non-negative whole number.
 
     Optional ``cap`` clamps the result (e.g. never sell more than held); a
@@ -66,7 +66,7 @@ def whole_share_qty(raw: float, *, cap: int | None = None) -> int:
     return qty
 
 
-def signed_shares(strategy: Strategy, ticker: str) -> float:
+def _signed_shares(strategy: Strategy, ticker: str) -> float:
     """Shares currently held in ``ticker``, signed. Returns 0.0 when flat.
 
     Signed rather than absolute so a short position reads as negative and the
@@ -77,7 +77,7 @@ def signed_shares(strategy: Strategy, ticker: str) -> float:
     return float(position.quantity) if position is not None else 0.0
 
 
-def entry_date(api, symbol: str, position_qty: float) -> date | None:
+def _entry_date(api, symbol: str, position_qty: float) -> date | None:
     """Date the currently open position was opened, from Alpaca's fill history.
 
     Walks fills newest to oldest and returns the one where the running signed
@@ -110,7 +110,7 @@ def entry_date(api, symbol: str, position_qty: float) -> date | None:
     return None
 
 
-def give_back_pct(
+def _give_back_pct(
     symbol: str,
     opened_on: date,
     avg_entry: float,
@@ -140,13 +140,13 @@ def _position_drawdown(api, position, ticker: str) -> tuple[float, float]:
     pnl_pct = round(float(position.unrealized_plpc) * 100.0, 2)
 
     quantity = float(position.qty)
-    opened_on = entry_date(api, ticker, quantity)
+    opened_on = _entry_date(api, ticker, quantity)
 
     if opened_on is None:
         log.warning("%s: no flat point in fill history — falling back to unrealized pnl", ticker)
         return pnl_pct, pnl_pct
 
-    give_back = give_back_pct(
+    give_back = _give_back_pct(
         symbol=ticker,
         opened_on=opened_on,
         avg_entry=float(position.avg_entry_price),
@@ -377,7 +377,7 @@ def size_drawdown_orders(
                 decision.ticker,
             )
 
-        held = signed_shares(strategy, ticker)
+        held = _signed_shares(strategy, ticker)
 
         # Max whole shares we can sell without going short of a fractional remainder.
         held_whole = math.floor(held)
@@ -404,7 +404,7 @@ def size_drawdown_orders(
                 continue
 
             # Round allocation to whole shares; never sell more than held.
-            qty = whole_share_qty(held * decision.amount, cap=held_whole)
+            qty = _whole_share_qty(held * decision.amount, cap=held_whole)
 
             if qty <= 0:
                 log.warning("%s: trim sizes to zero whole shares — skipping", ticker)
@@ -424,7 +424,7 @@ def size_drawdown_orders(
                 continue
 
             # Round allocation to whole shares (same fraction-of-held sizing).
-            qty = whole_share_qty(held * decision.amount)
+            qty = _whole_share_qty(held * decision.amount)
 
             if qty <= 0:
                 log.warning("%s: add sizes to zero whole shares — skipping", ticker)
@@ -499,7 +499,7 @@ def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> tuple
         # The position may have shrunk since sizing; selling more than we hold
         # would open a short in a long-only sleeve.
         if side == "sell":
-            qty = whole_share_qty(qty, cap=math.floor(signed_shares(strategy, ticker)))
+            qty = _whole_share_qty(qty, cap=math.floor(_signed_shares(strategy, ticker)))
 
             if qty <= 0:
                 log.warning("%s: position gone since sizing — skipping %s", ticker, label)
