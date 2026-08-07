@@ -622,11 +622,11 @@ def manage_drawdowns(
 
     freed_capital = estimate_freed_capital(strategy, sells)
 
-    # TODO: inject the cptl reallocator agent here to reallocate the portfolio based on the risk manager's decisions
-    # This will take the orders and then determine what it wants to do with the capital freed up from the sells
-    # (`freed`) and may append buys. Then all sized orders go through submit_drawdown_orders.
-    # The agent needs to append the sells and buys to the orders list
-    # Agent outputs orders --> append to buys, sells and then submit the orders in the main loop
+    # TODO: run cptl reallocator when freed_capital is deployable.
+    # Agent returns structured pick(s) (ticker + weight_pct) — no submit tool.
+    # Size those into whole-share buys against freed_capital / account value,
+    # append to `buys`, then the strategy pending book + submit_drawdown_orders
+    # flush handles sells-before-buys as usual.
     log.info("capital available for reallocation: $%.2f", freed_capital)
 
     # 5. Return new rows only; strategy appends into its pending book.

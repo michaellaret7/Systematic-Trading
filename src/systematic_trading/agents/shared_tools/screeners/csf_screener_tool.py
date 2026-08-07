@@ -1,8 +1,8 @@
-"""Agent tools for the CSF Champions risk manager.
+"""Agent tool: CSF Champions quality/value screen for candidate ranking.
 
-Screening reuses the strategy's own ``screen()`` policy so the agent sees the
-same ranking as idea generation. Callers may explicitly exclude portfolio
-tickers without coupling the tool to a broker.
+Reuses the strategy's own ``screen()`` policy so every agent sees the same
+ranking as idea generation. Callers may exclude tickers (e.g. current holdings)
+without coupling the tool to a broker.
 """
 
 from typing import Annotated
@@ -26,12 +26,12 @@ def _normalize_tickers(tickers: list[str] | None) -> set[str]:
 
 
 # ====================================
-# --> Tools
+# --> Tool
 # ====================================
 
 
 @agent_tool(name="RunScreener", safe_parallel=True)
-def run_screener(
+def csf_screener_tool(
     top_n: Annotated[
         int,
         Param(

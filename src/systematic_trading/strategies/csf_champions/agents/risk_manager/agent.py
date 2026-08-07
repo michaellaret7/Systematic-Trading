@@ -1,6 +1,5 @@
 from agent_harness.agent import Agent
 from agent_harness.decorator import bind_tool
-from agent_harness.sinks import LogSink
 
 from systematic_trading.agents.shared_tools.fundamentals import get_fundamental_statement
 from systematic_trading.agents.shared_tools.market_context import get_market_context
@@ -14,7 +13,6 @@ from systematic_trading.strategies.csf_champions.agents.risk_manager.subagents.m
 from systematic_trading.strategies.csf_champions.agents.risk_manager.subagents.ticker_research import (
     TICKER_RESEARCH_SUBAGENT_CONFIG,
 )
-from systematic_trading.strategies.csf_champions.agents.risk_manager.tools import run_screener
 
 MODEL = "openai/gpt-5.6-sol"
 STRATEGY = "csf_champions"
