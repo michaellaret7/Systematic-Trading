@@ -142,6 +142,8 @@ def create_droplet(
     region: str,
     image: str,
     log_group: str = CLOUDWATCH_LOG_GROUP,
+    *,
+    backups: bool = False,
 ) -> int:
     """POST the droplet to DigitalOcean and return its id.
 
@@ -149,6 +151,9 @@ def create_droplet(
     exports decide where logs actually go. It is a parameter so the two do not
     drift: jobs stream to a different group than strategies, and a hardcoded
     name here printed a command that tailed an empty group.
+
+    ``backups`` enables DigitalOcean automated backups for persistent droplets.
+    It defaults off because finite job droplets destroy themselves after running.
     """
     load_dotenv(override=False)
 
@@ -159,7 +164,7 @@ def create_droplet(
         "image": image,
         "user_data": script,
         "monitoring": True,
-        "backups": False,
+        "backups": backups,
         "ipv6": False,
         "tags": ["systematic-trading", name],
     }
@@ -286,12 +291,13 @@ def launch_strategy_droplet(
 
     The droplet bills until ``stop_droplet()`` or the DO console destroys it.
     Paper/live is decided by ``ALPACA_PAPER`` in the forwarded .env — this
-    launcher never overrides it. Logs land in ``logs/live_<strategy_name>/``.
+    launcher never overrides it. DigitalOcean automated backups are enabled.
+    Logs land in ``logs/live_<strategy_name>/``.
     """
     job_name = f"live_{strategy_name}"
     script = strategy_user_data(job_name, strategy_name, branch)
 
-    return create_droplet(job_name, script, size, region, image)
+    return create_droplet(job_name, script, size, region, image, backups=True)
 
 
 def stop_droplet(droplet_id: int) -> None:
