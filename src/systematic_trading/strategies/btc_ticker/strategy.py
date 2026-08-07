@@ -27,9 +27,9 @@ ALPACA_MIN_NOTIONAL_USD = 10.0
 NOTIONAL_BUFFER = 1.05
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def iteration_quantity(strategy: Strategy) -> float | None:

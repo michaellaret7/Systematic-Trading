@@ -22,9 +22,9 @@ from systematic_trading.strategies.csf_champions.portfolio import MIN_SCORE, Hol
 log = get_logger(__name__)
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def seed_portfolio(portfolio: Portfolio, bench: dict[str, Holding]) -> tuple[int, int]:

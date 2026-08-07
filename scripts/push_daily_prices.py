@@ -27,9 +27,9 @@ from systematic_trading.data.repository import (
     write_daily_prices,
 )
 
-#     ================================
+# ====================================
 # --> Entry point
-#     ================================
+# ====================================
 
 
 def main() -> None:

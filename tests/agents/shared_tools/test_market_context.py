@@ -22,9 +22,9 @@ def _universe(peer_returns: list[float]) -> tuple[pd.DataFrame, list[str]]:
     return frame, list(frame.columns)
 
 
-#     ================================
+# ====================================
 # --> Verdict rule
-#     ================================
+# ====================================
 
 
 def test_verdict_calls_a_falling_group_sector_driven() -> None:
@@ -65,9 +65,9 @@ def test_verdict_handles_missing_peers() -> None:
     assert "not enough history" in ctx._verdict(_series(-20.0), pd.DataFrame(), [])
 
 
-#     ================================
+# ====================================
 # --> Beta quality gate
-#     ================================
+# ====================================
 
 
 def test_beta_reports_correlation_alongside_the_slope() -> None:
@@ -88,9 +88,9 @@ def test_beta_is_nan_without_enough_overlap() -> None:
     assert pd.isna(beta) and pd.isna(correlation)
 
 
-#     ================================
+# ====================================
 # --> Live data
-#     ================================
+# ====================================
 
 
 def test_tool_runs_against_the_real_repository() -> None:

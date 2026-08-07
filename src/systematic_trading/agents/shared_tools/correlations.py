@@ -23,9 +23,9 @@ DEFAULT_CORR_THRESHOLD = 0.4
 MAX_PAIRS = 20
 FULL_MATRIX_MAX_TICKERS = 10
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def daily_returns(symbols: list[str]) -> pd.DataFrame:
@@ -61,9 +61,9 @@ def _top_pairs(matrix: pd.DataFrame, threshold: float) -> list[str]:
     return [f"{left}-{right}: {value:.2f}" for value, left, right in pairs]
 
 
-#     ================================
+# ====================================
 # --> Tool
-#     ================================
+# ====================================
 
 
 @agent_tool(name="GetPriceCorrelations", safe_parallel=True)

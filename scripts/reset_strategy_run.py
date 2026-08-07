@@ -36,9 +36,9 @@ from systematic_trading.data.repository.ideas import TABLE_NAME as IDEAS_TABLE
 from systematic_trading.data.repository.ideas import update_idea_status
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _broker_client() -> TradingClient:

@@ -47,9 +47,9 @@ DrawdownBreach = tuple[str, float, float, float, date]
 SizedOrder = tuple[str, int, str]
 
 
-#     ================================
+# ====================================
 # --> Helpers
-#     ================================
+# ====================================
 
 
 def _whole_share_qty(raw: float, *, cap: int | None = None) -> int:
@@ -157,9 +157,9 @@ def _position_drawdown(api, position, ticker: str) -> tuple[float, float]:
     return round(give_back, 2), pnl_pct
 
 
-#     ================================
+# ====================================
 # --> Drawdown detection
-#     ================================
+# ====================================
 
 
 def check_for_drawdown_breaches(
@@ -211,9 +211,9 @@ def check_for_drawdown_breaches(
     return breaches
 
 
-#     ================================
+# ====================================
 # --> Review cooldown
-#     ================================
+# ====================================
 
 
 def clear_expired_drawdown_reviews(
@@ -276,9 +276,9 @@ def release_drawdown_cooldowns(portfolio: Portfolio, tickers: list[str]) -> list
     return released
 
 
-#     ================================
+# ====================================
 # --> Agent review
-#     ================================
+# ====================================
 
 
 def _deploy_single_drawdown_agent(
@@ -346,9 +346,9 @@ def review_drawdowns(
     return results
 
 
-#     ================================
+# ====================================
 # --> Order sizing & capital
-#     ================================
+# ====================================
 
 
 def size_drawdown_orders(
@@ -477,9 +477,9 @@ def estimate_freed_capital(
     return freed
 
 
-#     ================================
+# ====================================
 # --> Order submission
-#     ================================
+# ====================================
 
 
 def _submit_side(strategy: Strategy, rows: list[SizedOrder], side: str) -> tuple[int, list[str]]:
@@ -560,9 +560,9 @@ def submit_drawdown_orders(
     return True
 
 
-#     ================================
+# ====================================
 # --> Main workflow
-#     ================================
+# ====================================
 
 
 def manage_drawdowns(

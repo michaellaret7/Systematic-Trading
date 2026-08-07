@@ -24,15 +24,15 @@ from systematic_trading.strategies.csf_champions.portfolio import (
     Portfolio,
 )
 
-#     ================================
+# ====================================
 # --> Config
-#     ================================
+# ====================================
 
 TRADING_DAYS_PER_YEAR = 252
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _exposure_lines(groups: dict[str, list[Holding]], total_weight: float) -> list[str]:
@@ -114,9 +114,9 @@ def _candidate_block(
     return block
 
 
-#     ================================
+# ====================================
 # --> Inspection tools (read-only)
-#     ================================
+# ====================================
 
 
 @agent_tool(name="ViewPortfolio", safe_parallel=True)
@@ -205,9 +205,9 @@ def get_idea_thesis(
     return f"{symbol} ({holding.side}, score {holding.score:.1f}): {holding.thesis}"
 
 
-#     ================================
+# ====================================
 # --> Risk tools (read-only)
-#     ================================
+# ====================================
 
 
 @agent_tool(name="GetPortfolioRisk", safe_parallel=True)
@@ -313,9 +313,9 @@ def get_portfolio_risk(
     return yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
 
 
-#     ================================
+# ====================================
 # --> Book-shaping tools
-#     ================================
+# ====================================
 
 
 @agent_tool(name="AddPosition")
@@ -436,9 +436,9 @@ def demote_to_bench(
     return f"{symbol} returned to the bench; total allocation is now {_portfolio.total_weight:.2f}%"
 
 
-#     ================================
+# ====================================
 # --> Idea-lifecycle tools
-#     ================================
+# ====================================
 
 
 @agent_tool(name="RejectIdea")
@@ -485,9 +485,9 @@ def reject_idea(
     return f"{symbol} rejected and removed from the bench"
 
 
-#     ================================
+# ====================================
 # --> Final gate
-#     ================================
+# ====================================
 
 
 @agent_tool(name="SubmitPortfolio")

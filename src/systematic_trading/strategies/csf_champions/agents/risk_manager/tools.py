@@ -1,41 +1,33 @@
 """Agent tools for the CSF Champions risk manager.
 
-Broker state is read from the Alpaca Trading API via ``config.alpaca_config`` —
-never from a Lumibot strategy instance. Screening reuses the strategy's own
-``screen()`` policy so the agent sees the same ranking as idea generation.
+Screening reuses the strategy's own ``screen()`` policy so the agent sees the
+same ranking as idea generation. Callers may explicitly exclude portfolio
+tickers without coupling the tool to a broker.
 """
 
 from typing import Annotated
 
 import yaml
 from agent_harness.decorator import Param, agent_tool
-from alpaca.trading.client import TradingClient
 
-from systematic_trading.config import alpaca_config
 from systematic_trading.strategies.csf_champions.screening import DISPLAY_COLUMNS, screen
 
 DEFAULT_TOP_N = 50
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
-def _held_tickers() -> set[str]:
-    """Open position symbols on the configured Alpaca account (paper or live)."""
-    config = alpaca_config()
-    client = TradingClient(
-        api_key=config["API_KEY"],
-        secret_key=config["API_SECRET"],
-        paper=config["PAPER"],
-    )
+def _normalize_tickers(tickers: list[str] | None) -> set[str]:
+    """Normalize optional ticker input for case-insensitive exclusion."""
 
-    return {position.symbol.upper() for position in client.get_all_positions()}
+    return {ticker.strip().upper() for ticker in tickers or [] if ticker.strip()}
 
 
-#     ================================
+# ====================================
 # --> Tools
-#     ================================
+# ====================================
 
 
 @agent_tool(name="RunScreener", safe_parallel=True)
@@ -44,29 +36,38 @@ def run_screener(
         int,
         Param(
             description=(
-                "How many ranked candidates to return after dropping held names "
+                "How many ranked candidates to return after applying exclusions "
                 f"(default {DEFAULT_TOP_N})."
             ),
             min_val=1.0,
             max_val=200.0,
         ),
     ] = DEFAULT_TOP_N,
+    exclude_tickers: Annotated[
+        list[str] | None,
+        Param(
+            description=(
+                "Optional ticker symbols to omit from the ranked candidates, such as "
+                "current portfolio holdings. Matching is case-insensitive."
+            )
+        ),
+    ] = None,
 ) -> str:
     """
     Run the CSF Champions quality/value screen and return the top ranked
-    tickers that are not already held in the Alpaca account.
+    candidates after removing any explicitly excluded tickers.
 
-    Held names are excluded so the list is candidates for new capital, not a
-    re-ranking of the existing book. Returns YAML: excluded count plus a
-    `candidates` list of display metrics, highest score first.
+    Exclusions are applied before selecting ``top_n`` so the requested number
+    of available candidates is preserved. Returns YAML with requested and
+    matched exclusion counts plus display metrics, highest score first.
     """
-    held = _held_tickers()
+    excluded = _normalize_tickers(exclude_tickers)
     ranked = screen()
 
     if ranked.empty:
         return "error: screen returned no rows"
 
-    available = ranked[~ranked["symbol"].str.upper().isin(held)]
+    available = ranked[~ranked["symbol"].str.upper().isin(excluded)]
     top = available.head(int(top_n))
 
     rows = top[DISPLAY_COLUMNS].to_dict("records")
@@ -77,7 +78,8 @@ def run_screener(
                 row[key] = round(float(value), 4)
 
     payload = {
-        "excluded_held": len(held),
+        "requested_exclusions": len(excluded),
+        "excluded": len(ranked) - len(available),
         "returned": len(rows),
         "candidates": rows,
     }

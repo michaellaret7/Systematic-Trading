@@ -48,9 +48,9 @@ ADJUSTED_RENAMES = {"adjOpen": "open", "adjHigh": "high", "adjLow": "low", "adjC
 STATEMENT_DATE_COLUMNS = ("date", "filingDate", "acceptedDate")
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _to_date(value: dt.date | dt.datetime | str) -> dt.date:
@@ -104,9 +104,9 @@ def _statement_frame(rows: list[dict]) -> pd.DataFrame:
     return df
 
 
-#     ================================
+# ====================================
 # --> Client
-#     ================================
+# ====================================
 
 
 class FMPClient:

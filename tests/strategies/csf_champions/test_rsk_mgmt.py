@@ -15,9 +15,9 @@ from systematic_trading.strategies.csf_champions.portfolio import Portfolio
 from systematic_trading.strategies.csf_champions.workflows import rsk_mgmt as risk
 
 
-#     ================================
+# ====================================
 # --> Fakes
-#     ================================
+# ====================================
 
 
 class FakePosition:
@@ -152,9 +152,9 @@ def flat_price_history(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-#     ================================
+# ====================================
 # --> check_for_drawdown_breaches
-#     ================================
+# ====================================
 
 
 def test_check_for_drawdown_breaches_flags_only_under_threshold() -> None:
@@ -320,9 +320,9 @@ def test_breach_falls_back_to_pnl_when_entry_unresolved() -> None:
     assert breaches[0][2] == -30.0
 
 
-#     ================================
+# ====================================
 # --> clear_expired_drawdown_reviews
-#     ================================
+# ====================================
 
 
 def test_clear_expired_drawdown_reviews_removes_only_stale() -> None:
@@ -356,9 +356,9 @@ def test_clear_expired_drawdown_reviews_noop_when_all_fresh() -> None:
     assert "AAPL" in portfolio.drawdown_reviews
 
 
-#     ================================
+# ====================================
 # --> review_drawdowns
-#     ================================
+# ====================================
 
 
 def test_review_drawdowns_returns_decision_per_success(
@@ -411,9 +411,9 @@ def test_review_drawdowns_empty_input_short_circuits(
     assert called is False
 
 
-#     ================================
+# ====================================
 # --> estimate_freed_capital
-#     ================================
+# ====================================
 
 
 def test_estimate_freed_capital_sums_sells_at_last_price() -> None:
@@ -453,9 +453,9 @@ def test_estimate_freed_capital_empty_sells() -> None:
     assert risk.estimate_freed_capital(strategy, []) == 0.0
 
 
-#     ================================
+# ====================================
 # --> size_drawdown_orders & submission
-#     ================================
+# ====================================
 
 
 class OrderStrategy:
@@ -601,9 +601,9 @@ def test_submit_sends_sells_before_buys() -> None:
     assert strategy.submitted == [("AAPL", 5, "sell"), ("MSFT", 2, "buy")]
 
 
-#     ================================
+# ====================================
 # --> manage_drawdowns (orchestration)
-#     ================================
+# ====================================
 
 
 def _stub_sizing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -17,9 +17,9 @@ from agent_harness.decorator import Param, agent_tool
 
 from systematic_trading.data.repository import load_statement, statement_columns
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def _parse_date(value: str) -> pd.Timestamp | None:
@@ -64,9 +64,9 @@ def _frame_to_records(frame: pd.DataFrame) -> list[dict]:
     return json.loads(frame.to_json(orient="records") or "[]")
 
 
-#     ================================
+# ====================================
 # --> Tool
-#     ================================
+# ====================================
 
 
 @agent_tool(name="GetFundamentalStatement", safe_parallel=True)

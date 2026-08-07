@@ -18,12 +18,12 @@ log = get_logger(__name__)
 STRATEGY = "csf_champions"
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
-def entry_quantity(strategy: Strategy, holding: Holding, account_value: float) -> int:
+def _entry_quantity(strategy: Strategy, holding: Holding, account_value: float) -> int:
     """Return the whole-share market quantity; zero means skip the holding."""
     last_price = strategy.get_last_price(holding.ticker)
 
@@ -51,9 +51,9 @@ def entry_quantity(strategy: Strategy, holding: Holding, account_value: float) -
     return quantity
 
 
-def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> bool:
+def _submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> bool:
     """Size and submit one whole-share DAY market buy."""
-    quantity = entry_quantity(strategy, holding, account_value)
+    quantity = _entry_quantity(strategy, holding, account_value)
 
     if quantity == 0:
         return False
@@ -83,6 +83,11 @@ def submit_entry(strategy: Strategy, holding: Holding, account_value: float) -> 
     return True
 
 
+# ====================================
+# --> Main workflow
+# ====================================
+
+
 def enter_positions(strategy: Strategy, portfolio: Portfolio) -> None:
     """Submit one whole-share DAY market buy per long draft holding."""
     if not portfolio.holdings:
@@ -103,7 +108,7 @@ def enter_positions(strategy: Strategy, portfolio: Portfolio) -> None:
             )
             continue
 
-        if submit_entry(strategy, holding, account_value):
+        if _submit_entry(strategy, holding, account_value):
             submitted += 1
 
     log.info(

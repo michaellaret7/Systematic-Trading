@@ -43,7 +43,12 @@ NAME_MARKET_CAP_FLOOR = 1_000_000_000
 log = get_logger(__name__)
 
 
-def company_names(symbols: list[str]) -> dict[str, str]:
+# ====================================
+# --> Helpers
+# ====================================
+
+
+def _company_names(symbols: list[str]) -> dict[str, str]:
     """Map each candidate symbol to its company name via one FMP screener call.
 
     Tickers collide across exchanges (AERO, IAG, ...), so agents need the full
@@ -59,7 +64,7 @@ def company_names(symbols: list[str]) -> dict[str, str]:
     return {symbol: names[symbol] for symbol in symbols if symbol in names}
 
 
-def analyze_candidate(symbol: str, name: str | None) -> None:
+def _analyze_candidate(symbol: str, name: str | None) -> None:
     """Run a fresh ticker-analyst agent over one ticker to its verdict."""
     agent = build_ticker_analyst()
 
@@ -75,11 +80,16 @@ def analyze_candidate(symbol: str, name: str | None) -> None:
     )
 
 
+# ====================================
+# --> Main workflow
+# ====================================
+
+
 def generate_trade_ideas() -> None:
     """Screen and analyze the highest-ranked CSF Champions candidates."""
     ranked = screen()
     symbols = ranked["symbol"].tolist()[:TOP_N]
-    names = company_names(symbols)
+    names = _company_names(symbols)
     run_start = datetime.now(timezone.utc)
 
     log.info("Analyzing %d tickers with %d concurrent agents", len(symbols), MAX_WORKERS)
@@ -93,7 +103,7 @@ def generate_trade_ideas() -> None:
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {
-            pool.submit(analyze_candidate, symbol, names.get(symbol)): symbol for symbol in symbols
+            pool.submit(_analyze_candidate, symbol, names.get(symbol)): symbol for symbol in symbols
         }
 
         for future in as_completed(futures):
@@ -154,10 +164,6 @@ def generate_trade_ideas() -> None:
 
     log.info("Batch complete: %d succeeded, %d failed", done, failed)
 
-
-# in the strategy class
-# if ideas_generated = True, pull from dynamodb
-# if ideas_generated = False, generate new ideas, pull from dynamodb
 
 if __name__ == "__main__":
     configure_logging()

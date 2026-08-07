@@ -35,7 +35,7 @@ def test_generate_trade_ideas_isolates_candidate_failures(
     # idea-count query, and the agent — so the test stays offline.
     monkeypatch.setattr(generate_trade_ideas, "screen", lambda: ranked)
     monkeypatch.setattr(
-        generate_trade_ideas, "company_names", lambda syms: {s: f"{s} Inc." for s in syms}
+        generate_trade_ideas, "_company_names", lambda syms: {s: f"{s} Inc." for s in syms}
     )
     monkeypatch.setattr(generate_trade_ideas, "count_ideas_since", lambda strategy, since: 0)
     monkeypatch.setattr(generate_trade_ideas, "build_ticker_analyst", lambda: FakeAgent(analyzed))

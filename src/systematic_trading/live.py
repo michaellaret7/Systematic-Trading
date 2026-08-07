@@ -28,9 +28,9 @@ from systematic_trading.strategies import STRATEGIES
 
 TARGETS = ("local", "cloud")
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def parse_args() -> argparse.Namespace:

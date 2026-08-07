@@ -32,9 +32,9 @@ from systematic_trading.data.repository import (
     write_daily_prices,
 )
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def split_symbols(client: FMPClient, start: dt.date, end: dt.date) -> set[str]:
@@ -50,9 +50,9 @@ def split_symbols(client: FMPClient, start: dt.date, end: dt.date) -> set[str]:
     return set(splits["symbol"])
 
 
-#     ================================
+# ====================================
 # --> Entry point
-#     ================================
+# ====================================
 
 
 def update_daily_prices() -> None:

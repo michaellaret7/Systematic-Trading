@@ -36,9 +36,9 @@ from systematic_trading.screener.fundamentals.build import build_panel
 # after it. Over-fetching is harmless — the merge is idempotent.
 LOOKBACK_DAYS = 30
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def update_statement(client: FMPClient, statement: str, period: str, symbols: list[str]) -> None:
@@ -66,9 +66,9 @@ def update_statement(client: FMPClient, statement: str, period: str, symbols: li
         print(f"[{tag}] failed symbols ({len(failures)}): {', '.join(failures)}")
 
 
-#     ================================
+# ====================================
 # --> Entry point
-#     ================================
+# ====================================
 
 
 def main() -> None:

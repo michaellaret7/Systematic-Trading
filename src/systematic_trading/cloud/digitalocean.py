@@ -96,9 +96,9 @@ systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgra
 """
 
 
-#     ================================
+# ====================================
 # --> Helper funcs
-#     ================================
+# ====================================
 
 
 def env_snippet() -> str:
@@ -191,9 +191,9 @@ def create_droplet(
     return droplet_id
 
 
-#     ================================
+# ====================================
 # --> Start scripts
-#     ================================
+# ====================================
 
 
 def strategy_user_data(job_name: str, strategy_name: str, branch: str) -> str:
@@ -245,9 +245,9 @@ systemctl enable --now strategy.service
 """
 
 
-#     ================================
+# ====================================
 # --> Public API
-#     ================================
+# ====================================
 
 
 def launch_job_droplet(
